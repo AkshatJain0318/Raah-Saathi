@@ -1,0 +1,3004 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RaahSaathi — Hyper-Local Transit & Daily Commute Dashboard</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 9999px;
+    }
+    @keyframes pulseSlow {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.65; transform: scale(1.08); }
+    }
+    .pulse-dot {
+      animation: pulseSlow 2s infinite ease-in-out;
+    }
+    .lite-mode-active {
+      background-color: #090d16 !important;
+    }
+    #indoreLeafletMap {
+      height: 450px !important;
+      min-height: 450px !important;
+      width: 100% !important;
+      background-color: #e8eaed !important;
+    }
+    .leaflet-container {
+      font-family: 'Inter', Roboto, Arial, sans-serif !important;
+      background-color: #e8eaed !important;
+    }
+    .gmap-stop-label {
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      color: #202124;
+      font-weight: 700;
+      font-size: 10px;
+      padding: 1px 5px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-amber-500 selection:text-slate-950">
+
+  <!-- TOP ANNOUNCEMENT / STATUS BAR -->
+  <div id="networkBanner" class="bg-slate-900 border-b border-slate-800 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-2">
+    <div class="flex items-center gap-2">
+      <span id="liveSyncIndicator" class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 pulse-dot"></span>
+      <span id="networkStatusText" class="text-slate-300 font-medium">Socket.io + Redis Geo-Sync Active • Indore City Bus (AICTSL i-Bus BRTS, Midi & EV City Routes)</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-slate-400 hidden sm:inline">Last Timetable Cache: <strong id="lastCacheTime" class="text-slate-200">Just now</strong></span>
+      <button id="toggleLiteModeBtn" type="button" class="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-semibold transition flex items-center gap-1.5">
+        <span>📡</span>
+        <span id="liteModeBtnLabel">Weak-Net Lite Mode: OFF</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- MAIN HEADER -->
+  <header class="bg-slate-900/90 backdrop-blur sticky top-0 z-30 border-b border-slate-800 px-4 lg:px-8 py-3.5">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <!-- Brand -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-slate-950 font-extrabold text-xl shadow-lg shadow-amber-500/20">
+          🚌
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg sm:text-xl font-extrabold tracking-tight text-white">RaahSaathi</h1>
+            <span class="text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold">Hyper-Local Transit</span>
+          </div>
+          <p class="text-xs text-slate-400">Indore City Bus (AICTSL i-Bus &amp; Feeder) • React PWA • Node.js + Socket.io • Redis • Leaflet Live Map</p>
+        </div>
+      </div>
+
+      <!-- User Stats Pill Bar -->
+      <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+        <button id="openStreakTabBtn" type="button" class="flex items-center gap-2 bg-slate-800/90 hover:bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl transition">
+          <span class="text-base">🔥</span>
+          <div class="text-left">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Commute Streak</div>
+            <div class="text-xs font-bold text-amber-400"><span id="headerStreakCount">98</span> Days <span class="text-[10px] text-emerald-400">(Sat/Sun Safe 🛡️)</span></div>
+          </div>
+        </button>
+
+        <button id="openRepModalBtn" type="button" class="flex items-center gap-2 bg-slate-800/90 hover:bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl transition">
+          <span class="text-base">⭐</span>
+          <div class="text-left">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Scout Reputation</div>
+            <div class="text-xs font-bold text-sky-400"><span id="headerRepPoints">420</span> pts • <span id="headerKmPoints">1,240</span> KM pts</div>
+          </div>
+        </button>
+
+        <button id="openReportModalBtn" type="button" class="bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-bold text-xs sm:text-sm px-3.5 py-2.5 rounded-xl shadow-md shadow-amber-500/10 transition flex items-center gap-1.5">
+          <span>📢</span>
+          <span>Post Delay / Crowd</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="max-w-7xl mx-auto mt-3 pt-2 border-t border-slate-800/80 flex items-center gap-1.5 overflow-x-auto custom-scroll pb-1">
+      <button type="button" data-tab="tab-routes" class="nav-tab-btn px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition whitespace-nowrap bg-amber-500 text-slate-950">
+        🧭 Route Search &amp; Live Buses
+      </button>
+      <button type="button" data-tab="tab-stops" class="nav-tab-btn px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition whitespace-nowrap bg-slate-800/70 text-slate-300 hover:bg-slate-800">
+        🚏 Bus Stop Queue &amp; Boarding Advisor
+      </button>
+      <button type="button" data-tab="tab-carpool" class="nav-tab-btn px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition whitespace-nowrap bg-slate-800/70 text-slate-300 hover:bg-slate-800">
+        🚗 P2P Cab &amp; Carpool Share (<span id="navCarpoolCount">5</span>)
+      </button>
+      <button type="button" data-tab="tab-cost" class="nav-tab-btn px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition whitespace-nowrap bg-slate-800/70 text-slate-300 hover:bg-slate-800">
+        📊 Monthly Cost Comparator
+      </button>
+      <button type="button" data-tab="tab-streaks" class="nav-tab-btn px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition whitespace-nowrap bg-slate-800/70 text-slate-300 hover:bg-slate-800">
+        🎁 Streaks, Weekend Shield &amp; Discounts
+      </button>
+      <button type="button" data-tab="tab-offline" class="nav-tab-btn px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition whitespace-nowrap bg-slate-800/70 text-slate-300 hover:bg-slate-800">
+        📵 Offline Timetable &amp; SMS Alerts
+      </button>
+      <button type="button" data-tab="tab-city-extras" class="nav-tab-btn px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition whitespace-nowrap bg-slate-800/70 text-emerald-300 hover:bg-slate-800 border border-emerald-500/30">
+        ✨ Smart City Extras (QR Pass, Pink SOS &amp; Transfer Sync)
+      </button>
+      <button type="button" data-tab="tab-tech-stack" class="nav-tab-btn px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition whitespace-nowrap bg-slate-800/70 text-sky-300 hover:bg-slate-800 border border-sky-500/30">
+        ⚡ Socket.io + Redis + React PWA Stack
+      </button>
+    </div>
+  </header>
+
+  <!-- WEAK NETWORK LITE BANNER (HIDDEN UNLESS LITE MODE ON) -->
+  <div id="liteModeQuickStrip" class="hidden bg-amber-500/10 border-b border-amber-500/40 px-4 py-2.5">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
+      <div class="flex items-center gap-2 text-amber-300">
+        <span class="font-bold uppercase px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/40">2G / Offline Lite Active</span>
+        <span>Showing cached schedules, text-first crowd estimates &amp; zero-data SMS triggers for highway/rural blind spots.</span>
+      </div>
+      <button id="jumpToSmsBtn" type="button" class="underline text-amber-300 font-semibold hover:text-amber-200">Open SMS Alert Simulator →</button>
+    </div>
+  </div>
+
+  <!-- MAIN CONTENT CONTAINER -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 space-y-6">
+
+    <!-- ==========================================
+         TAB 1: ROUTE SEARCH, 3 RECOMMENDATIONS & LIVE CROWD
+         ========================================== -->
+    <section id="tab-routes" class="tab-panel space-y-6">
+
+      <!-- Search & Filter Bar -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+          <div class="md:col-span-4">
+            <label for="originSelect" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Origin Stop / Hub</label>
+            <select id="originSelect" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400">
+              <optgroup label="🔵 AB Road BRTS Corridor (i-Bus)">
+                <option value="Bhawarkuan Square (BRTS)" selected>Bhawarkuan Square (DAVV / Coaching Hub)</option>
+                <option value="Rajiv Gandhi Square (IT Park)">Rajiv Gandhi Square / Crystal IT Park</option>
+                <option value="Silicon City Gate (Rau)">Silicon City Gate (Rau AB Road)</option>
+                <option value="Rau Circle / Medicaps Gate">Rau Circle / Medicaps University Gate</option>
+                <option value="IPS Academy / Rajendra Nagar">IPS Academy / Rajendra Nagar BRTS</option>
+                <option value="Vishnupuri / Mata Gujri Stop">Vishnupuri / Mata Gujri BRTS Stop</option>
+                <option value="Holkar Science College">Holkar Science College BRTS</option>
+                <option value="Navlakha Square / Bus Stand">Navlakha Square / Bus Stand</option>
+                <option value="Zoo / GPO Square">Indore Zoo / GPO Square</option>
+                <option value="Shivaji Vatika / AICTSL HQ">Shivaji Vatika / AICTSL HQ</option>
+                <option value="Geeta Bhawan Square">Geeta Bhawan Square BRTS</option>
+                <option value="Palasia Square (56 Dukan)">Palasia Square / 56 Dukan</option>
+                <option value="Industry House Stop">Industry House AB Road</option>
+                <option value="LIG Square (BRTS)">LIG Square BRTS</option>
+                <option value="Press Complex / MR-9">Press Complex / MR-9 Square</option>
+                <option value="Vijay Nagar Square (C21 Mall)">Vijay Nagar Square (C21 / Malhar Mall)</option>
+                <option value="Satya Sai Square">Satya Sai Square BRTS</option>
+                <option value="Shalimar Township">Shalimar Township Stop</option>
+                <option value="Niranjanpur / Scheme 78">Niranjanpur / Scheme 78 (BRTS Terminus)</option>
+              </optgroup>
+              <optgroup label="🟠 Central, Railway &amp; West Indore">
+                <option value="Rajwada / Regal Square">Rajwada / Regal Square (Central Hub)</option>
+                <option value="Sarwate / Railway Station">Sarwate Bus Stand / Indore Junction</option>
+                <option value="Gangwal Bus Stand">Gangwal Bus Stand (West Depot)</option>
+                <option value="Bada Ganpati Square">Bada Ganpati Square</option>
+                <option value="Mhow Naka / Annapurna">Mhow Naka / Annapurna Temple</option>
+                <option value="Tower Square / Sapna Sangeeta">Tower Square / Sapna Sangeeta</option>
+                <option value="Footi Kothi / Gopur Square">Footi Kothi / Gopur Square</option>
+                <option value="Choithram Mandi Square">Choithram Mandi Square</option>
+              </optgroup>
+              <optgroup label="🟢 Super Corridor, Airport &amp; Ujjain Rd">
+                <option value="Devi Ahilya Airport Terminal">Devi Ahilya Bai Airport Terminal</option>
+                <option value="Super Corridor Square">Super Corridor Square</option>
+                <option value="TCS Garima Park (Super Corridor)">TCS Garima Park (Super Corridor)</option>
+                <option value="Infosys SEZ (Super Corridor)">Infosys Campus (Super Corridor)</option>
+                <option value="Symbiosis / NMIMS Campus">Symbiosis / NMIMS Super Corridor</option>
+                <option value="MR-10 ISBT / Toll Naka">MR-10 ISBT / Toll Naka</option>
+                <option value="Aurobindo Hospital (SAIMS)">Aurobindo Hospital (SAIMS Ujjain Rd)</option>
+              </optgroup>
+              <optgroup label="🟣 Ring Road, East Indore &amp; IIM">
+                <option value="Radisson Square (Ring Road)">Radisson Square (Ring Road)</option>
+                <option value="Khajrana Ganesh Mandir">Khajrana Ganesh Mandir Square</option>
+                <option value="Bombay Hospital Square">Bombay Hospital Square</option>
+                <option value="Bengali Square">Bengali Square (Ring Road)</option>
+                <option value="Pipliyahana / World Cup Sq">Pipliyahana / World Cup Square (Sch 140)</option>
+                <option value="Musakhedi Square">Musakhedi Square</option>
+                <option value="Teen Imli Bus Stand">Teen Imli Bus Stand</option>
+                <option value="Dewas Naka Industrial Hub">Dewas Naka / Lasudia Industrial Hub</option>
+                <option value="IIM Indore Gate (Rau Rd)">IIM Indore Gate (Rau-Pithampur Rd)</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div class="md:col-span-1 flex justify-center">
+            <button id="swapRouteBtn" type="button" title="Swap Origin and Destination" class="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-400 flex items-center justify-center transition">
+              ⇄
+            </button>
+          </div>
+
+          <div class="md:col-span-4">
+            <label for="destSelect" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Destination (College / Office / City)</label>
+            <select id="destSelect" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400">
+              <optgroup label="🔵 AB Road BRTS Corridor (i-Bus)">
+                <option value="Vijay Nagar / C21 Mall (BRTS)" selected>Vijay Nagar / C21 &amp; Malhar Mall (BRTS)</option>
+                <option value="Crystal IT Park / Rajiv Gandhi Sq">Crystal IT Park / Rajiv Gandhi Square</option>
+                <option value="Palasia / 56 Dukan">Palasia Square / 56 Dukan</option>
+                <option value="Bhawarkuan Square (DAVV)">Bhawarkuan Square (DAVV / Coaching Hub)</option>
+                <option value="Holkar Science College">Holkar Science College BRTS</option>
+                <option value="Navlakha Bus Stand">Navlakha Square / Bus Stand</option>
+                <option value="Geeta Bhawan Square">Geeta Bhawan Square BRTS</option>
+                <option value="LIG Square (BRTS)">LIG Square BRTS</option>
+                <option value="Press Complex / MR-9">Press Complex / MR-9 Square</option>
+                <option value="Satya Sai Square (Sch 54)">Satya Sai Square (Scheme 54)</option>
+                <option value="Niranjanpur / Scheme 78">Niranjanpur / Scheme 78 Terminus</option>
+                <option value="IPS Academy / Rajendra Nagar">IPS Academy / Rajendra Nagar</option>
+                <option value="Rau Circle / Medicaps University">Rau Circle / Medicaps University</option>
+              </optgroup>
+              <optgroup label="🟢 Super Corridor, IT SEZ &amp; Airport">
+                <option value="Super Corridor (TCS / Infosys)">Super Corridor (TCS / Infosys Campus)</option>
+                <option value="TCS Garima Park Gate-1">TCS Garima Park Gate-1</option>
+                <option value="Infosys SEZ Phase-2">Infosys SEZ Campus</option>
+                <option value="Symbiosis / NMIMS University">Symbiosis / NMIMS Super Corridor</option>
+                <option value="Devi Ahilya Airport">Devi Ahilya Bai Holkar Airport</option>
+                <option value="MR-10 ISBT Bus Terminal">MR-10 ISBT Bus Terminal</option>
+                <option value="Aurobindo Hospital (SAIMS)">Aurobindo Hospital (Ujjain Road)</option>
+              </optgroup>
+              <optgroup label="🟣 Ring Road, East &amp; Central Hubs">
+                <option value="Khajrana / Radisson Square">Khajrana Ganesh / Radisson Square</option>
+                <option value="Bombay Hospital Square">Bombay Hospital Square</option>
+                <option value="Bengali Square">Bengali Square (Ring Road)</option>
+                <option value="Pipliyahana / World Cup Sq">Pipliyahana / World Cup Square (Sch 140)</option>
+                <option value="Musakhedi / Teen Imli">Musakhedi / Teen Imli Bus Stand</option>
+                <option value="Dewas Naka Industrial Area">Dewas Naka Industrial Area</option>
+                <option value="Rajwada / Regal Square">Rajwada Palace / Regal Square</option>
+                <option value="Sarwate Bus Stand / Railway Stn">Sarwate Bus Stand / Indore Railway Stn</option>
+                <option value="Gangwal / Bada Ganpati">Gangwal Bus Stand / Bada Ganpati</option>
+                <option value="Tower Square / Sapna Sangeeta">Tower Square / Sapna Sangeeta</option>
+                <option value="Mhow Naka / Annapurna Rd">Mhow Naka / Annapurna Temple</option>
+                <option value="Choithram Mandi / Gopur Sq">Choithram Mandi / Gopur Square</option>
+                <option value="IIM Indore Campus">IIM Indore Campus (Rau)</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div class="md:col-span-3">
+            <label for="commuterPassToggle" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Daily Commuter Seat Hold</label>
+            <button id="commuterPassToggle" type="button" class="w-full px-3.5 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center justify-between hover:bg-emerald-500/25 transition">
+              <span>🎫 Pass Holder Mode: ON</span>
+              <span class="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px]">ACTIVE</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 3 Recommendation Strategy Pills -->
+        <div class="mt-4 pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-slate-400">Smart Recommendation Mode:</span>
+            <div class="inline-flex rounded-xl bg-slate-800 p-1 border border-slate-700">
+              <button type="button" data-rec="least-wait" class="rec-mode-btn px-3 py-1.5 rounded-lg text-xs font-bold transition bg-amber-500 text-slate-950">
+                ⚡ Least Waiting Time
+              </button>
+              <button type="button" data-rec="cheapest" class="rec-mode-btn px-3 py-1.5 rounded-lg text-xs font-bold transition text-slate-300 hover:text-white">
+                💰 Cheapest Route
+              </button>
+              <button type="button" data-rec="fewest-changes" class="rec-mode-btn px-3 py-1.5 rounded-lg text-xs font-bold transition text-slate-300 hover:text-white">
+                🔄 Fewest Bus Changes
+              </button>
+            </div>
+          </div>
+          <div class="text-xs text-slate-400">
+            Showing <span id="activeCorridorLabel" class="text-amber-300 font-semibold">Dhar Bus Stand → Bhawarkuan / IT Park (Indore)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- NEXT BUS VS FOLLOWING BUS CROWD PREDICTION BANNER -->
+      <div class="bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/60 border border-indigo-500/30 rounded-2xl p-4 sm:p-5 shadow-lg">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div class="flex items-center gap-2">
+            <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 uppercase tracking-wider">
+              AI + Crowd Occupancy Forecast
+            </span>
+            <span class="text-xs text-amber-300 font-medium">⚠️ Prediction is an ESTIMATE — not confirmed seat availability</span>
+          </div>
+          <span class="text-xs text-slate-400">Sources: 👥 18 Passenger Reports • 📟 Onboard Counter • 🛰️ Operator GPS</span>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
+          <!-- Next Bus Card -->
+          <div class="lg:col-span-5 bg-slate-800/80 border border-rose-500/40 rounded-xl p-3.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase text-rose-400">Next Bus (Arriving in 3 mins)</span>
+              <span class="text-xs px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 font-semibold">~85% Est. Crowded</span>
+            </div>
+            <div class="mt-1.5 flex items-baseline justify-between">
+              <div class="text-sm font-bold text-white">i-Bus BRTS #IB-104 (Rau → Niranjanpur)</div>
+              <div class="text-xs text-amber-300">Delayed +4m at Navlakha Signal</div>
+            </div>
+            <div class="mt-2 w-full bg-slate-700 h-2.5 rounded-full overflow-hidden">
+              <div class="bg-rose-500 h-full rounded-full" style="width: 85%"></div>
+            </div>
+            <div class="mt-1.5 flex items-center justify-between text-[11px] text-slate-400">
+              <span>Standing room only • 6 reports in last 10m</span>
+              <span>Pass Holders: 2 reserved seats left</span>
+            </div>
+          </div>
+
+          <!-- Comparison Arrow -->
+          <div class="lg:col-span-2 flex flex-col items-center justify-center text-center py-1">
+            <div class="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
+              💡 Smart Wait Tip
+            </div>
+            <p class="text-[11px] text-slate-300 mt-1">Wait just <strong>+8 mins</strong> for <strong>45% less crowd</strong>!</p>
+          </div>
+
+          <!-- Following Bus Card -->
+          <div class="lg:col-span-5 bg-slate-800/80 border border-emerald-500/40 rounded-xl p-3.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase text-emerald-400">Following Bus (+8 mins later)</span>
+              <span class="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold">~40% Est. Crowded</span>
+            </div>
+            <div class="mt-1.5 flex items-baseline justify-between">
+              <div class="text-sm font-bold text-white">i-Bus EV #IB-209 (AC Electric BRTS)</div>
+              <div class="text-xs text-emerald-400">On Time • Verified GPS</div>
+            </div>
+            <div class="mt-2 w-full bg-slate-700 h-2.5 rounded-full overflow-hidden">
+              <div class="bg-emerald-400 h-full rounded-full" style="width: 40%"></div>
+            </div>
+            <div class="mt-1.5 flex items-center justify-between text-[11px] text-slate-400">
+              <span>Window seats likely • Onboard sensor active</span>
+              <span>Pass Holders: 9 seats open</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- INTERACTIVE LEAFLET.JS LIVE MAP OF INDORE CITY BUSES & STOPS -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold uppercase">Leaflet.js + Socket.io Live Map</span>
+              <h2 class="text-base font-bold text-white">🗺️ Indore City Live Bus Tracker &amp; Stop Crowd Heatmap</h2>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">Real-time coordinates streamed via simulated <code class="text-amber-300">Socket.io</code> &amp; <code class="text-sky-300">Redis GEOADD</code> across AB Road BRTS, Ring Road &amp; Super Corridor</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button id="centerMapIndoreBtn" type="button" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-amber-300 transition">
+              🎯 Re-Center Indore Map
+            </button>
+            <button id="simulateSocketTickBtn" type="button" class="px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-xs font-semibold text-sky-300 transition">
+              ⚡ Force Socket.io GPS Tick (<span id="socketLatencyBadge">18ms</span>)
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+          <div class="lg:col-span-8 relative rounded-xl overflow-hidden border border-slate-700 bg-slate-100 shadow-inner" style="height: 450px;">
+            <!-- Google Maps Style Floating Top-Left Search/Route Pill -->
+            <div class="absolute top-3 left-14 z-[400] bg-white/95 backdrop-blur border border-slate-300 rounded-xl px-3 py-2 shadow-lg flex items-center gap-2.5 text-xs text-slate-800 max-w-xs sm:max-w-md pointer-events-auto">
+              <span class="text-base">📍</span>
+              <div class="truncate">
+                <div class="font-bold text-slate-900 leading-tight">Google Maps Transit View • Indore</div>
+                <div id="gmapFloatingRouteText" class="text-[11px] text-blue-600 font-semibold truncate">AB Road BRTS, Ring Rd, MG Rd &amp; Super Corridor</div>
+              </div>
+            </div>
+
+            <!-- Google Maps Style Top-Right Map Type Switcher (Map | Satellite | Traffic) -->
+            <div class="absolute top-3 right-3 z-[400] bg-white/95 backdrop-blur border border-slate-300 rounded-xl p-1 shadow-lg flex items-center gap-1 text-xs pointer-events-auto">
+              <button type="button" data-gmapmode="roadmap" class="gmap-mode-btn px-2.5 py-1 rounded-lg font-bold bg-blue-600 text-white transition">🗺️ Map</button>
+              <button type="button" data-gmapmode="satellite" class="gmap-mode-btn px-2.5 py-1 rounded-lg font-semibold text-slate-700 hover:bg-slate-100 transition">🛰️ Satellite</button>
+              <button type="button" id="toggleGmapTrafficBtn" class="px-2.5 py-1 rounded-lg font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 transition">🚦 Traffic: ON</button>
+            </div>
+
+            <!-- Google Maps Style Bottom-Left Traffic Bar -->
+            <div class="absolute bottom-3 left-3 z-[400] bg-white/95 backdrop-blur border border-slate-300 rounded-lg px-2.5 py-1.5 shadow-md flex items-center gap-2 text-[11px] text-slate-700 font-medium pointer-events-auto">
+              <span>Live Traffic:</span>
+              <span class="inline-block w-3 h-1.5 rounded bg-emerald-500"></span><span>Fast</span>
+              <span class="inline-block w-3 h-1.5 rounded bg-amber-500"></span><span>Slow</span>
+              <span class="inline-block w-3 h-1.5 rounded bg-rose-600"></span><span>Jam</span>
+            </div>
+
+            <div id="indoreLeafletMap" class="w-full h-full z-10"></div>
+          </div>
+          <div class="lg:col-span-4 bg-slate-950 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between space-y-3">
+            <div>
+              <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
+                <span class="text-xs font-bold text-sky-400 font-mono">🟢 SOCKET.IO + REDIS STREAM</span>
+                <span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">PUB/SUB: indore:gps</span>
+              </div>
+              <div id="liveSocketLogBox" class="space-y-1.5 font-mono text-[11px] text-slate-300 max-h-48 overflow-y-auto custom-scroll pr-1">
+                <!-- Populated by JS -->
+              </div>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-[11px] space-y-1">
+              <div class="font-bold text-white">Map Legend (Click any marker):</div>
+              <div class="flex items-center gap-2 text-slate-300"><span class="inline-block w-2.5 h-2.5 rounded-full bg-sky-400"></span> i-Bus BRTS Corridor (Rau ↔ Niranjanpur)</div>
+              <div class="flex items-center gap-2 text-slate-300"><span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-400"></span> City Feeder Routes (M-4, R-5, E-2, C-1)</div>
+              <div class="flex items-center gap-2 text-slate-300"><span class="inline-block w-2.5 h-2.5 rounded-full bg-rose-500"></span> High Stop Crowd Queue (&gt;35 waiting)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TWO-COLUMN LAYOUT: ROUTE CARDS (LEFT 7 COLS) + LIVE COMMUNITY FEED (RIGHT 5 COLS) -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Route Options List -->
+        <div class="lg:col-span-7 space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-base font-bold text-white flex items-center gap-2">
+              <span>🛣️</span>
+              <span id="routeListHeading">Recommended Transit Routes (Sorted by Least Waiting Time)</span>
+            </h2>
+            <span class="text-xs text-slate-400">Tap any bus to hold a Daily Commuter Seat</span>
+          </div>
+
+          <div id="routesContainer" class="space-y-4">
+            <!-- Dynamically rendered via JS -->
+          </div>
+        </div>
+
+        <!-- Right Column: Verified Crowdsourced Delay & Occupancy Feed -->
+        <div class="lg:col-span-5 space-y-4">
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5">
+            <div class="flex items-center justify-between mb-3">
+              <div>
+                <h2 class="text-base font-bold text-white flex items-center gap-2">
+                  <span>📡</span>
+                  <span>Live Verified Commuter Reports</span>
+                </h2>
+                <p class="text-xs text-slate-400">Triangulated via GPS proximity, multi-user votes &amp; operator feed</p>
+              </div>
+              <button id="quickPostBtnRight" type="button" class="text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 px-2.5 py-1.5 rounded-lg font-semibold transition">
+                + Report
+              </button>
+            </div>
+
+            <!-- Filter pills for feed -->
+            <div class="flex items-center gap-1.5 mb-3 overflow-x-auto pb-1">
+              <button type="button" data-feedfilter="all" class="feed-filter-btn text-xs px-2.5 py-1 rounded-md bg-slate-700 text-white font-semibold">All Reports</button>
+              <button type="button" data-feedfilter="verified" class="feed-filter-btn text-xs px-2.5 py-1 rounded-md bg-slate-800 text-slate-400 hover:text-white">✅ Verified Only</button>
+              <button type="button" data-feedfilter="delays" class="feed-filter-btn text-xs px-2.5 py-1 rounded-md bg-slate-800 text-slate-400 hover:text-white">⏱️ Delays</button>
+            </div>
+
+            <div id="liveReportsFeed" class="space-y-3 max-h-[540px] overflow-y-auto custom-scroll pr-1">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         TAB 2: BUS STOP CROWD & BOARDING PROBABILITY ADVISOR
+         ========================================== -->
+    <section id="tab-stops" class="tab-panel hidden space-y-6">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-5">
+          <div>
+            <h2 class="text-lg font-bold text-white">🚏 Bus Stop Queue &amp; Smart Boarding Probability Advisor</h2>
+            <p class="text-xs text-slate-400">Don't just track the bus—check how crowded the bus stand is and whether walking to an upstream stop guarantees a seat.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <label for="stopAdvisorSelect" class="text-xs font-semibold text-slate-400">Select Stop:</label>
+            <select id="stopAdvisorSelect" class="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs sm:text-sm text-white font-semibold focus:outline-none focus:border-amber-400">
+              <option value="rau-circle" selected>Bhawarkuan Square i-Bus Station (BRTS)</option>
+              <option value="pithampur-sec3">Vijay Nagar / C21 Mall BRTS Station</option>
+              <option value="dhar-stand">Rajwada / Subhash Chowk City Bus Stop</option>
+              <option value="rajiv-gandhi">Rajiv Gandhi Square / Crystal IT Park</option>
+              <option value="palasia-sq">Palasia Square / 56 Dukan BRTS</option>
+              <option value="navlakha-sq">Navlakha Square / Bus Stand</option>
+              <option value="lig-sq">LIG Square BRTS Junction</option>
+              <option value="radisson-sq">Radisson Square / Khajrana Ring Rd</option>
+              <option value="sarwate-stand">Sarwate Bus Stand / Railway Junction</option>
+              <option value="super-corridor">Super Corridor (TCS / Infosys Gate)</option>
+              <option value="medicaps-rau">Medicaps University / Rau Circle</option>
+              <option value="bengali-sq">Bengali Square / Pipliyahana Ring Rd</option>
+              <option value="mhow-naka">Mhow Naka / Annapurna Hub</option>
+              <option value="dewas-naka">Dewas Naka Industrial Hub</option>
+              <option value="mr10-isbt">MR-10 ISBT / Aurobindo Hospital</option>
+              <option value="tower-sapna">Tower Square / Sapna Sangeeta</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="stopAdvisorDetailContainer">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         TAB 3: PEER-TO-PEER CAB & CARPOOL MATCHING
+         ========================================== -->
+    <section id="tab-carpool" class="tab-panel hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Left 8 cols: Active Rides to Join -->
+        <div class="lg:col-span-8 space-y-4">
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div>
+                <h2 class="text-lg font-bold text-white">🚗 Peer-to-Peer Daily Commuter Carpool &amp; Shared Cabs</h2>
+                <p class="text-xs text-slate-400">Verified students &amp; office professionals sharing empty car/cab seats on your daily route</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <select id="carpoolFilterCorridor" class="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+                  <option value="ALL">All Regional Corridors</option>
+                  <option value="Dhar ↔ Indore">Dhar ↔ Indore / IT Park</option>
+                  <option value="Indore ↔ Pithampur">Indore ↔ Pithampur SEZ</option>
+                  <option value="Mhow ↔ Rau ↔ Indore">Mhow ↔ Rau ↔ Medicaps / Indore</option>
+                </select>
+              </div>
+            </div>
+
+            <div id="carpoolListContainer" class="space-y-3">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Right 4 cols: Offer a Ride Form -->
+        <div class="lg:col-span-4">
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-28">
+            <h3 class="text-base font-bold text-white mb-1">➕ Share Your Cab / Car Seat</h3>
+            <p class="text-xs text-slate-400 mb-4">Going by personal car, bike, or booked a cab? Split fuel/fare with verified daily commuters.</p>
+
+            <form id="offerRideForm" class="space-y-3">
+              <div>
+                <label class="block text-xs text-slate-400 mb-1">Your Name &amp; College/Org Tag</label>
+                <input id="rideDriverName" type="text" required placeholder="e.g. Aman Verma (TCS Indore)" value="Rohan Patidar (IIM / Rau Tech Park)" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+              </div>
+
+              <div>
+                <label class="block text-xs text-slate-400 mb-1">Corridor</label>
+                <select id="rideCorridor" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+                  <option value="Dhar ↔ Indore">Dhar Bus Stand → Bhawarkuan IT Park</option>
+                  <option value="Indore ↔ Pithampur">Rau / Rajendra Nagar → Pithampur Sec-3</option>
+                  <option value="Mhow ↔ Rau ↔ Indore">Mhow Naka → Medicaps / Vijay Nagar</option>
+                </select>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label class="block text-xs text-slate-400 mb-1">Departure Time</label>
+                  <input id="rideTime" type="text" required value="08:45 AM" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                </div>
+                <div>
+                  <label class="block text-xs text-slate-400 mb-1">Vehicle Type</label>
+                  <select id="rideVehicle" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+                    <option value="Hatchback AC (Swift)">Hatchback AC (Car)</option>
+                    <option value="Shared Ertiga Cab">Shared Cab (6-Seater)</option>
+                    <option value="EV Sedan (Nexon EV)">EV Carpool</option>
+                    <option value="2-Wheeler Pillion">Bike Pool (1 Seat)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label class="block text-xs text-slate-400 mb-1">Seats Available</label>
+                  <input id="rideSeats" type="number" min="1" max="5" value="3" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                </div>
+                <div>
+                  <label class="block text-xs text-slate-400 mb-1">Cost Split / Seat (₹)</label>
+                  <input id="ridePrice" type="number" min="20" max="500" value="85" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                </div>
+              </div>
+
+              <button type="submit" class="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-2.5 rounded-xl transition shadow-md">
+                🚀 Publish Carpool Listing (+20 Rep Pts)
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         TAB 4: DAILY & MONTHLY COMMUTE COST COMPARATOR
+         ========================================== -->
+    <section id="tab-cost" class="tab-panel hidden space-y-6">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div class="mb-5">
+          <h2 class="text-lg font-bold text-white">📊 Multi-Modal Daily &amp; Monthly Commute Cost Comparator</h2>
+          <p class="text-xs text-slate-400">Compare Bus-Only, Bus + Shared Auto (Last-Mile), and Peer-to-Peer Carpool across your monthly working/college days.</p>
+        </div>
+
+        <!-- Sliders -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-800/60 border border-slate-700/80 rounded-xl p-4 mb-6">
+          <div>
+            <div class="flex justify-between text-xs mb-1.5">
+              <span class="text-slate-300 font-semibold">One-Way Commute Distance</span>
+              <span class="text-amber-400 font-bold"><span id="calcDistVal">32</span> km</span>
+            </div>
+            <input id="calcDistSlider" type="range" min="8" max="75" value="32" class="w-full accent-amber-400 cursor-pointer" />
+            <div class="flex justify-between text-[10px] text-slate-400 mt-1">
+              <span>8 km (Rau–Indore)</span>
+              <span>32 km (Pithampur)</span>
+              <span>65 km (Dhar–Indore)</span>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-xs mb-1.5">
+              <span class="text-slate-300 font-semibold">Commute Days / Month</span>
+              <span class="text-amber-400 font-bold"><span id="calcDaysVal">22</span> Days</span>
+            </div>
+            <input id="calcDaysSlider" type="range" min="12" max="28" value="22" class="w-full accent-amber-400 cursor-pointer" />
+            <div class="flex justify-between text-[10px] text-slate-400 mt-1">
+              <span>16d (Hybrid)</span>
+              <span>22d (5-Day Office/Clg)</span>
+              <span>26d (6-Day Shift)</span>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-xs mb-1.5">
+              <span class="text-slate-300 font-semibold">Apply Streak Pass Discount?</span>
+              <span id="calcStreakStatusLabel" class="text-emerald-400 font-bold">20% Streak Discount ON</span>
+            </div>
+            <button id="toggleCalcDiscountBtn" type="button" class="w-full py-2 px-3 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/30 transition">
+              🎁 Toggle 100-Streak Reward Discount (20% Off)
+            </button>
+          </div>
+        </div>
+
+        <!-- 3 Comparison Cards -->
+        <div id="costCardsContainer" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- Populated dynamically by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         TAB 5: GAMIFIED STREAKS, WEEKEND PROTECTION & DISCOUNTS
+         ========================================== -->
+    <section id="tab-streaks" class="tab-panel hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Left 7 cols: Streak Engine & Holiday Protection -->
+        <div class="lg:col-span-7 space-y-4">
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div>
+                <span class="text-[11px] uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold">Daily Motivation &amp; Perks</span>
+                <h2 class="text-lg font-bold text-white mt-1">🔥 Commuter Streak &amp; Weekend Holiday Shield</h2>
+                <p class="text-xs text-slate-400">Earn points per KM traveled + maintain daily streaks without losing progress on your Saturday/Sunday college or office holidays!</p>
+              </div>
+              <button id="simulateCheckinBtn" type="button" class="bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-slate-950 font-extrabold text-xs px-4 py-2.5 rounded-xl shadow-lg transition">
+                ✅ Log Today's Commute (+32 KM &amp; +1 Streak)
+              </button>
+            </div>
+
+            <!-- Streak Progress Bar to 100 -->
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 mb-4">
+              <div class="flex items-baseline justify-between mb-2">
+                <div>
+                  <span class="text-2xl font-extrabold text-amber-400" id="streakBigNumber">98</span>
+                  <span class="text-xs text-slate-300 font-semibold"> / 100 Day Milestone Streak</span>
+                </div>
+                <span id="streakMilestoneStatus" class="text-xs font-bold text-amber-300">Just 2 more commute days to unlock Flat 25% Pass Discount!</span>
+              </div>
+              <div class="w-full h-3 bg-slate-700 rounded-full overflow-hidden">
+                <div id="streakProgressBar" class="h-full bg-gradient-to-r from-amber-400 to-emerald-400 transition-all duration-300" style="width: 98%"></div>
+              </div>
+              <div class="mt-2.5 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
+                <span>🛣️ Distance Traveled: <strong id="totalKmDisplay" class="text-white">1,240 km</strong></span>
+                <span>🏅 Commuter Tier: <strong class="text-emerald-400">Platinum Regional Regular</strong></span>
+              </div>
+            </div>
+
+            <!-- Schedule Type Selector (Sat/Sun Holiday Protection) -->
+            <div class="mb-4">
+              <label class="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-2">
+                🛡️ Configure Your Office / College Off-Days (Auto-Freezes Streak on Holidays):
+              </label>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <button type="button" data-sched="sat-sun" class="sched-type-btn p-3 rounded-xl border text-left transition bg-amber-500/15 border-amber-400 text-white">
+                  <div class="text-xs font-bold">🏢 5-Day Office / IT / College</div>
+                  <div class="text-[11px] text-amber-300 mt-0.5">Sat &amp; Sun Auto-Protected 🛡️</div>
+                </button>
+                <button type="button" data-sched="alt-sat" class="sched-type-btn p-3 rounded-xl border text-left transition bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600">
+                  <div class="text-xs font-bold">🎓 College / Bank (2nd &amp; 4th Sat)</div>
+                  <div class="text-[11px] text-slate-400 mt-0.5">Sun + Alt Sat Protected 🛡️</div>
+                </button>
+                <button type="button" data-sched="sun-only" class="sched-type-btn p-3 rounded-xl border text-left transition bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600">
+                  <div class="text-xs font-bold">🏭 6-Day Industrial / Plant Shift</div>
+                  <div class="text-[11px] text-slate-400 mt-0.5">Sunday Only Protected 🛡️</div>
+                </button>
+              </div>
+            </div>
+
+            <!-- 14-Day Visual Streak Shield Calendar -->
+            <div>
+              <div class="text-xs font-semibold text-slate-400 mb-2">Last 14 Days Commute &amp; Weekend Shield Log:</div>
+              <div id="streakCalendarGrid" class="grid grid-cols-7 gap-2 text-center">
+                <!-- Populated by JS -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right 5 cols: Rewards & Discount Store -->
+        <div class="lg:col-span-5 space-y-4">
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            <h3 class="text-base font-bold text-white mb-1">🎁 Commuter Perks &amp; Streak Discounts</h3>
+            <p class="text-xs text-slate-400 mb-4">Redeem your Streak Milestones &amp; KM Points for bus pass discounts, shared auto vouchers, and highway chai perks.</p>
+
+            <div id="rewardsListContainer" class="space-y-3">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         TAB 6: WEAK-NETWORK / OFFLINE TIMETABLE & SMS ALERTS
+         ========================================== -->
+    <section id="tab-offline" class="tab-panel hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Offline Cached Timetable -->
+        <div class="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+            <div>
+              <h2 class="text-lg font-bold text-white">📵 Offline Last-Known Timetable &amp; Stop Directory</h2>
+              <p class="text-xs text-slate-400">Stored locally in browser memory for zero-network highway patches (Ghatabillod, Betma, Lebad, Mhow Ghat)</p>
+            </div>
+            <button id="refreshOfflineCacheBtn" type="button" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-amber-300">
+              🔄 Sync Snapshot Now
+            </button>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="border-b border-slate-700 text-slate-400 uppercase">
+                  <th class="py-2.5 px-3">Bus / Operator</th>
+                  <th class="py-2.5 px-3">Corridor</th>
+                  <th class="py-2.5 px-3">Scheduled Dep</th>
+                  <th class="py-2.5 px-3">Usual Crowd</th>
+                  <th class="py-2.5 px-3">Emergency Helpline / Stop Info</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800 text-slate-200">
+                <tr>
+                  <td class="py-2.5 px-3 font-bold text-white">MP-09-FA-4821 (Chartered)</td>
+                  <td class="py-2.5 px-3">Dhar → Indore (Bhawarkuan)</td>
+                  <td class="py-2.5 px-3 font-mono text-amber-300">07:45 AM, 08:15 AM</td>
+                  <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300">High (~85%)</span></td>
+                  <td class="py-2.5 px-3 text-slate-400">Plat 2 Dhar • Stops at Betma Toll</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-bold text-white">MP-11-ZC-1904 (AICTSL)</td>
+                  <td class="py-2.5 px-3">Dhar → Indore (Sarwate)</td>
+                  <td class="py-2.5 px-3 font-mono text-amber-300">07:53 AM, 08:30 AM</td>
+                  <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">Mod (~40%)</span></td>
+                  <td class="py-2.5 px-3 text-slate-400">Plat 1 Dhar • Bypass Direct</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-bold text-white">MP-09-PA-1120 (SEZ Shuttle)</td>
+                  <td class="py-2.5 px-3">Rau Circle → Pithampur Sec-3</td>
+                  <td class="py-2.5 px-3 font-mono text-amber-300">08:10 AM, 08:40 AM</td>
+                  <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">Mod (~60%)</span></td>
+                  <td class="py-2.5 px-3 text-slate-400">Under Rau Flyover Pillar #14</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-bold text-white">MP-09-CW-7731 (Mhow Exp)</td>
+                  <td class="py-2.5 px-3">Mhow Naka → Medicaps → IT Park</td>
+                  <td class="py-2.5 px-3 font-mono text-amber-300">08:20 AM, 08:50 AM</td>
+                  <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">Low (~35%)</span></td>
+                  <td class="py-2.5 px-3 text-slate-400">opp. Kishanganj Pullia</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- SMS / Low-Bandwidth Push Simulator -->
+        <div class="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <h3 class="text-base font-bold text-white mb-1">📲 Zero-Data SMS / Missed-Call Alert Simulator</h3>
+          <p class="text-xs text-slate-400 mb-4">When mobile data drops in semi-urban belts, commuters send a shortcode SMS to get instant live bus ETA &amp; crowd status.</p>
+
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Select SMS Shortcode Command:</label>
+              <select id="smsCommandSelect" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono">
+                <option value="BUS DHAR-INDR">SMS "BUS DHAR-INDR" to 56767</option>
+                <option value="STOP RAU-CIR">SMS "STOP RAU-CIR" to 56767</option>
+                <option value="POOL PITHAMPUR">SMS "POOL PITHAMPUR" to 56767</option>
+              </select>
+            </div>
+
+            <button id="sendSimulatedSmsBtn" type="button" class="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs py-2.5 rounded-xl transition">
+              📩 Simulate Offline SMS Query
+            </button>
+
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 font-mono text-xs space-y-2">
+              <div class="text-[10px] text-slate-500 uppercase">Simulated GSM Handset Screen</div>
+              <div id="smsOutputBox" class="text-emerald-400 leading-relaxed">
+                [RaahSaathi SMS Gate]: Ready. Select a shortcode above and tap Simulate to test zero-internet commuter alerts.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ==========================================
+         TAB 7: SMART INDORE CITY EXTRAS (QR PASS, PINK SOS, FEEDER SYNC)
+         ========================================== -->
+    <section id="tab-city-extras" class="tab-panel hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Feature 1: BRTS to Feeder Transfer Sync -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between space-y-4">
+          <div>
+            <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">Extra Feature #1 • Transfer Sync</span>
+            <h3 class="text-base font-bold text-white mt-2">🔄 Live BRTS ↔ Feeder Connection Sync</h3>
+            <p class="text-xs text-slate-400 mt-1">Checks via Redis live ETA whether your incoming City Feeder bus will reach the junction in time to catch the next i-Bus BRTS.</p>
+
+            <div class="mt-4 space-y-2.5 bg-slate-800/70 border border-slate-700 rounded-xl p-3.5 text-xs">
+              <div class="flex justify-between">
+                <span class="text-slate-400">Junction Hub:</span>
+                <strong class="text-white">Rajiv Gandhi Square BRTS</strong>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-400">Incoming Feeder (Route M-12):</span>
+                <strong class="text-emerald-400">Arrives in 2m 10s</strong>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-400">Connecting i-Bus (#IB-209):</span>
+                <strong class="text-amber-300">Departs in 4m 05s</strong>
+              </div>
+              <div class="pt-2 border-t border-slate-700 flex items-center justify-between">
+                <span class="text-slate-300 font-semibold">Transfer Buffer:</span>
+                <span id="transferBufferBadge" class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">+1m 55s Safe (94% Match)</span>
+              </div>
+            </div>
+          </div>
+          <button id="requestFeederHoldBtn" type="button" class="w-full py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs transition">
+            🔔 Ping Conductor: "3 Passengers Transferring at Junction"
+          </button>
+        </div>
+
+        <!-- Feature 2: Pink i-Bus, Women Safety & SOS Shield -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between space-y-4">
+          <div>
+            <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/30">Extra Feature #2 • Safe Commute</span>
+            <h3 class="text-base font-bold text-white mt-2">🛡️ Pink i-Bus, CCTV Live Status &amp; Women SOS</h3>
+            <p class="text-xs text-slate-400 mt-1">Dedicated telemetry for AICTSL Pink Buses, onboard IP camera health, well-lit stop ratings, and 1-tap AICTSL Control Room SOS.</p>
+
+            <div class="mt-4 space-y-2 bg-slate-800/70 border border-pink-500/30 rounded-xl p-3.5 text-xs">
+              <div class="flex items-center justify-between">
+                <span class="text-slate-300">Next Pink i-Bus (BRTS):</span>
+                <strong class="text-pink-300">In 6 mins (#PK-04)</strong>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-300">Onboard CCTV &amp; Panic Button:</span>
+                <strong class="text-emerald-400">🟢 Online (AICTSL Command)</strong>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-300">Stop Lighting Score (Bhawarkuan):</span>
+                <strong class="text-amber-300">4.8 / 5.0 ★ (38 Crowd Reports)</strong>
+              </div>
+            </div>
+          </div>
+          <button id="triggerPinkSosBtn" type="button" class="w-full py-2.5 rounded-xl bg-pink-500 hover:bg-pink-400 text-slate-950 font-bold text-xs transition">
+            🚨 Simulate Live Location Share &amp; AICTSL Control Alert
+          </button>
+        </div>
+
+        <!-- Feature 3: Chalo / NCMC Digital QR Smart Pass -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between space-y-4">
+          <div>
+            <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Extra Feature #3 • Smart Ticketing</span>
+            <h3 class="text-base font-bold text-white mt-2">📲 Instant NCMC / Chalo QR Ticket &amp; Pass</h3>
+            <p class="text-xs text-slate-400 mt-1">Skip paper ticket queues at BRTS turnstiles. Auto-applies your Streak Discount and generates an offline-verifiable signed QR token.</p>
+
+            <div class="mt-4 bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">Smart Wallet Balance:</span>
+                <strong id="walletBalanceDisplay" class="text-emerald-400 text-sm">₹245.00</strong>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400">Selected Corridor Fare:</span>
+                <span class="text-white font-bold"><s class="text-slate-500 mr-1">₹20</s> ₹15 (Streak Pass)</span>
+              </div>
+              <div id="qrTokenPreviewBox" class="p-2 rounded bg-slate-900 text-amber-300 font-mono text-[11px] text-center">
+                Token: AICTSL-QR-99281-ACTIVE
+              </div>
+            </div>
+          </div>
+          <button id="generateQrTicketBtn" type="button" class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition">
+            🎫 Generate Instant Turnstile QR Ticket (-₹15)
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         TAB 8: FULL-STACK ARCHITECTURE (REACT PWA + NODE.JS + SOCKET.IO + REDIS + LEAFLET)
+         ========================================== -->
+    <section id="tab-tech-stack" class="tab-panel hidden space-y-6">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-5 shadow-xl">
+        <!-- Header with Live Running Controls -->
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 pulse-dot"></span>
+              <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase">Live Real-Time Engine Running</span>
+              <span id="liveEngineUptime" class="text-xs font-mono text-slate-400">Uptime: 00:42:18</span>
+            </div>
+            <h2 class="text-lg font-bold text-white mt-1">⚡ Live Socket.io + Redis Geo + React PWA Telemetry Console</h2>
+            <p class="text-xs text-slate-400">Real-time Indore City Bus GPS stream, Redis 150m geofence checks, and live corridor room broadcasts running continuously.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button id="toggleLiveStreamBtn" type="button" class="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-bold text-emerald-300 transition flex items-center gap-1.5">
+              <span id="toggleLiveStreamIcon">⏸️</span>
+              <span id="toggleLiveStreamLabel">Live Stream: RUNNING (1s tick)</span>
+            </button>
+            <button id="sendTestPingBtn" type="button" class="px-3 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold transition shadow-md">
+              ⚡ Force Burst Ping
+            </button>
+          </div>
+        </div>
+
+        <!-- 4 Live Service Nodes with Dynamic Bars & Counters -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+          <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-sky-400 font-bold text-sm">1. React PWA + Leaflet</span>
+              <span id="nodePwaFps" class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px] font-bold">60 FPS</span>
+            </div>
+            <p class="text-slate-300 text-[11px]">IndexedDB offline cache &amp; 38 Indore stop heatmaps syncing live.</p>
+            <div class="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
+              <div id="nodePwaBar" class="bg-sky-400 h-full transition-all duration-500" style="width: 94%"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-400 font-mono">
+              <span>Cache: 38/38 Stops</span>
+              <span id="nodePwaSyncText" class="text-emerald-400">Synced 0.8s ago</span>
+            </div>
+          </div>
+
+          <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-emerald-400 font-bold text-sm">2. Node.js + Socket.io</span>
+              <span id="statBroadcastLatency" class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold">15 ms</span>
+            </div>
+            <p class="text-slate-300 text-[11px]">Live corridor rooms pushing GPS, delay &amp; seat-hold packets.</p>
+            <div class="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
+              <div id="nodeSocketBar" class="bg-emerald-400 h-full transition-all duration-500" style="width: 82%"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-400 font-mono">
+              <span>Clients: <strong id="statActiveSockets" class="text-white">1,486</strong></span>
+              <span>Rate: <strong id="statGpsRate" class="text-amber-300">88/s</strong></span>
+            </div>
+          </div>
+
+          <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-rose-400 font-bold text-sm">3. Redis Geo + Pub/Sub</span>
+              <span id="nodeRedisLatency" class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 font-mono text-[10px] font-bold">1.8 ms</span>
+            </div>
+            <p class="text-slate-300 text-[11px]"><code class="text-amber-300">GEOADD</code> &amp; <code class="text-amber-300">GEORADIUS</code> 150m proximity checks active.</p>
+            <div class="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
+              <div id="nodeRedisBar" class="bg-rose-400 h-full transition-all duration-500" style="width: 76%"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-400 font-mono">
+              <span>Ops: <strong id="nodeRedisOps" class="text-white">148/sec</strong></span>
+              <span class="text-emerald-400">Hit: 99.6%</span>
+            </div>
+          </div>
+
+          <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-amber-400 font-bold text-sm">4. Crowd Consensus AI</span>
+              <span id="nodeCrowdConf" class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono text-[10px] font-bold">96.8% Conf</span>
+            </div>
+            <p class="text-slate-300 text-[11px]">Merges Chalo ETM tickets + 3 commuter GPS votes + bus speed.</p>
+            <div class="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
+              <div id="nodeCrowdBar" class="bg-amber-400 h-full transition-all duration-500" style="width: 91%"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-400 font-mono">
+              <span>Verified: <strong id="nodeVerifiedCount" class="text-white">312</strong></span>
+              <span class="text-amber-300">Live ETM Sync</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- LIVE RUNNING FLEET TELEMETRY TABLE + LIVE WEBSOCKET STREAM -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <!-- Left 7 Cols: Live Fleet Telemetry Table (Updates every 1.2s) -->
+          <div class="lg:col-span-7 bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+              <div class="flex items-center gap-2">
+                <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
+                <h3 class="text-xs sm:text-sm font-bold text-white">🚌 Live Indore Fleet Telemetry (Real-Time GPS &amp; ETM Occupancy)</h3>
+              </div>
+              <span class="text-[11px] font-mono text-sky-400">Auto-updating every 1.2s</span>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr class="border-b border-slate-800 text-[10px] text-slate-400 uppercase">
+                    <th class="py-2 px-2">Bus ID</th>
+                    <th class="py-2 px-2">Live GPS (Lat, Lng)</th>
+                    <th class="py-2 px-2">Speed</th>
+                    <th class="py-2 px-2">Est. Crowd</th>
+                    <th class="py-2 px-2 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="liveFleetTelemetryBody" class="divide-y divide-slate-900 font-mono text-[11px]">
+                  <!-- Dynamically updated every second by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right 5 Cols: Live Scrolling Socket.io & Redis Event Stream -->
+          <div class="lg:col-span-5 bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3">
+            <div>
+              <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5 mb-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-emerald-400 font-mono">🟢 LIVE SOCKET.IO + REDIS FEED</span>
+                </div>
+                <span id="livePacketCounterBadge" class="text-[10px] px-2 py-0.5 rounded bg-slate-900 text-amber-300 border border-slate-800 font-mono">1,840 pkts</span>
+              </div>
+
+              <!-- Corridor Room Live Subscribers Strip -->
+              <div class="grid grid-cols-3 gap-2 mb-3 text-[10px]">
+                <div class="bg-slate-900 border border-slate-800 rounded-lg p-2">
+                  <div class="text-sky-400 font-bold truncate">room:brts-ab</div>
+                  <div id="roomCountBrts" class="text-white font-mono font-bold mt-0.5">684 online</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-lg p-2">
+                  <div class="text-amber-400 font-bold truncate">room:mg-feeder</div>
+                  <div id="roomCountMg" class="text-white font-mono font-bold mt-0.5">420 online</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-lg p-2">
+                  <div class="text-emerald-400 font-bold truncate">room:super-ev</div>
+                  <div id="roomCountEv" class="text-white font-mono font-bold mt-0.5">382 online</div>
+                </div>
+              </div>
+
+              <!-- Live Scrolling Event Feed -->
+              <div id="techStackLiveFeedBox" class="space-y-1.5 font-mono text-[11px] max-h-60 overflow-y-auto custom-scroll pr-1">
+                <!-- Populated & auto-scrolled every second by JS -->
+              </div>
+            </div>
+
+            <div class="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
+              <span>Redis Geo Radius: <strong class="text-emerald-400">150m Active</strong></span>
+              <button id="simulateCrowdSurgeBtn" type="button" class="text-xs text-amber-300 hover:text-amber-200 font-semibold underline">
+                + Simulate Commuter Vote Surge
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODAL: POST LIVE DELAY / CROWD REPORT -->
+  <div id="reportModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-base font-bold text-white">📢 Post Verified Commuter Update</h3>
+        <button id="closeReportModalBtn" type="button" class="text-slate-400 hover:text-white text-lg leading-none">&times;</button>
+      </div>
+      <p class="text-xs text-slate-400 mb-4">Your report is tagged with your GPS corridor proximity and matched with fellow passengers. Earn <strong>+15 Scout Reputation Points</strong>!</p>
+
+      <form id="submitReportForm" class="space-y-3">
+        <div>
+          <label class="block text-xs text-slate-300 mb-1">Bus / Stop Corridor</label>
+          <select id="reportRouteSelect" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+            <option value="MP-09-FA-4821 (Dhar → Indore)">MP-09-FA-4821 • Dhar → Indore Express</option>
+            <option value="MP-11-ZC-1904 (AICTSL Inter-City)">i-Bus EV #IB-209 (AC Electric BRTS)</option>
+            <option value="Rau Circle Bus Stop Queue">Rau Circle Bypass Stop (Queue Status)</option>
+            <option value="MP-09-PA-1120 (Rau → Pithampur SEZ)">MP-09-PA-1120 • Pithampur SEZ Shuttle</option>
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2.5">
+          <div>
+            <label class="block text-xs text-slate-300 mb-1">Delay Status</label>
+            <select id="reportDelaySelect" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+              <option value="On Time">🟢 On Time</option>
+              <option value="Delayed +8 mins" selected>🟡 Delayed +8 mins</option>
+              <option value="Heavy Jam +18 mins">🔴 Heavy Jam +18 mins</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-300 mb-1">Est. Crowd Occupancy</label>
+            <select id="reportCrowdSelect" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+              <option value="35% (Seats Open)">🟢 ~35% (Seats Open)</option>
+              <option value="65% (Few Seats)">🟡 ~65% (Few Seats)</option>
+              <option value="85% (Standing Only)" selected>🔴 ~85% (Standing Only)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs text-slate-300 mb-1">Location Note / Stop Queue Observation</label>
+          <input id="reportNoteInput" type="text" required placeholder="e.g. Crossing Betma toll, 15 students waiting at stop" value="Slow moving truck traffic near Ghatabillod bypass; next bus 8 mins behind is empty." class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+        </div>
+
+        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-2.5 text-[11px] text-emerald-300 flex items-center gap-2">
+          <span>📍</span>
+          <span>GPS Telemetry Check: Within 90m of NH-47 Corridor • Auto-Tagged as On-Route Commuter</span>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button id="cancelReportModalBtn" type="button" class="px-3.5 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold">Submit Report (+15 Pts)</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 hidden max-w-sm bg-slate-900 border border-amber-400/50 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 text-xs">
+    <span id="toastIcon" class="text-lg">✅</span>
+    <div id="toastMessage" class="font-medium">Action completed!</div>
+  </div>
+
+  <script>
+    // ==========================================
+    // APPLICATION STATE
+    // ==========================================
+    const state = {
+      liteMode: false,
+      commuterPassActive: true,
+      recMode: 'least-wait', // 'least-wait' | 'cheapest' | 'fewest-changes'
+      feedFilter: 'all',
+      streakDays: 98,
+      repPoints: 420,
+      kmPoints: 1240,
+      scheduleType: 'sat-sun', // 'sat-sun' | 'alt-sat' | 'sun-only'
+      calcDiscountActive: true,
+      heldSeats: {},
+      joinedCarpools: {},
+      claimedRewards: {},
+      routes: [
+        {
+          id: 'rt-1',
+          busNo: 'i-Bus #IB-209 (BRTS)',
+          name: 'AICTSL AC Electric i-Bus (BRTS Dedicated Lane)',
+          type: 'Direct BRTS Corridor (0 Transfers)',
+          transfers: 0,
+          waitMins: 8,
+          durationMins: 24,
+          fare: 20,
+          crowdPct: 40,
+          crowdLabel: '~40% Est. Crowd (Seats Likely)',
+          crowdColor: 'emerald',
+          delayText: 'On Time • Dedicated BRTS Lane • Socket.io Live',
+          steps: ['Board at Bhawarkuan BRTS Turnstile', 'Dedicated Corridor via Holkar College, Navlakha, Palasia, LIG', 'Alight at Vijay Nagar / C21 Mall BRTS Station'],
+          seatsHoldable: 9
+        },
+        {
+          id: 'rt-2',
+          busNo: 'i-Bus #IB-104 + Feeder M-4',
+          name: 'Next Immediate i-Bus + Ring Road Feeder Transfer',
+          type: 'Fastest Next Pickup (1 Transfer at Palasia)',
+          transfers: 1,
+          waitMins: 3,
+          durationMins: 28,
+          fare: 25,
+          crowdPct: 85,
+          crowdLabel: '~85% Est. Crowd (Standing Room)',
+          crowdColor: 'rose',
+          delayText: 'Delayed +4m near Navlakha Signal • 14 Crowd Reports',
+          steps: ['Board i-Bus #IB-104 in 3 mins (85% crowded)', 'Transfer at Palasia Square (94% Sync Confidence)', 'Catch City Bus Route M-4 to Destination'],
+          seatsHoldable: 2
+        },
+        {
+          id: 'rt-3',
+          busNo: 'City Midi #R-5 (MP-09-PA-4410)',
+          name: 'AICTSL Blue Midi City Bus (Student Pass Route)',
+          type: 'Lowest Fare Direct City Bus (0 Transfers)',
+          transfers: 0,
+          waitMins: 11,
+          durationMins: 34,
+          fare: 15,
+          crowdPct: 55,
+          crowdLabel: '~55% Est. Crowd (Moderate)',
+          crowdColor: 'amber',
+          delayText: 'On Time • ETM Ticket Sensor Synced',
+          steps: ['Board Route R-5 at Main Curbside Stop', 'Via Tower Square, Sapna Sangeeta, Geeta Bhawan, MIG', 'Direct drop at Destination Stop'],
+          seatsHoldable: 12
+        }
+      ],
+      reports: [
+        {
+          id: 'rep-101',
+          route: 'i-Bus #IB-104 (Bhawarkuan → Vijay Nagar BRTS)',
+          author: 'Priya S. (DAVV / Holkar Student)',
+          timeAgo: '2 mins ago',
+          delay: 'Delayed +4 mins',
+          crowd: '85% (Standing Only)',
+          note: 'Heavy coaching dispersal rush at Bhawarkuan BRTS. Next Electric i-Bus #IB-209 is 8 mins behind with ~40% crowd!',
+          confirmations: 4,
+          gpsVerified: true,
+          operatorVerified: true,
+          userConfirmed: false
+        },
+        {
+          id: 'rep-102',
+          route: 'Bhawarkuan Square BRTS Station Queue',
+          author: 'Vikram D. (Crystal IT Park)',
+          timeAgo: '5 mins ago',
+          delay: 'Stop Queue Alert',
+          crowd: '44 Waiting at Turnstile',
+          note: 'Long queue at Bhawarkuan North turnstile. Walk 350m upstream to Mata Gujri / Vishnupuri BRTS stop to get a guaranteed seat.',
+          confirmations: 3,
+          gpsVerified: true,
+          operatorVerified: false,
+          userConfirmed: false
+        },
+        {
+          id: 'rep-103',
+          route: 'City EV Route #E-2 (Rajwada → Super Corridor TCS)',
+          author: 'Deepak K. (TCS Indore)',
+          timeAgo: '7 mins ago',
+          delay: 'On Time',
+          crowd: '42% (Seats Open)',
+          note: 'Smooth traffic past Bada Ganpati & Airport Road. 14+ window seats open.',
+          confirmations: 2,
+          gpsVerified: true,
+          operatorVerified: true,
+          userConfirmed: false
+        }
+      ],
+      stopsData: {
+        'rau-circle': {
+          name: 'Bhawarkuan Square i-Bus BRTS Station',
+          currentQueue: 44,
+          queueLevel: 'High Coaching & DAVV University Crowd (44 waiting)',
+          boardingProb: 38,
+          peakHours: '08:30 AM – 10:15 AM & 05:30 PM – 07:30 PM',
+          betterStopName: 'Vishnupuri / Mata Gujri Upstream BRTS Stop (380m south)',
+          betterStopQueue: 9,
+          betterStopProb: 89,
+          tip: 'i-Buses towards Vijay Nagar fill up at Bhawarkuan Square. Walking 4 mins south to Vishnupuri BRTS Stop gives you an 89% chance of getting a seat before the coaching rush boards.'
+        },
+        'pithampur-sec3': {
+          name: 'Vijay Nagar / C21 Mall BRTS Station',
+          currentQueue: 38,
+          queueLevel: 'High Office & Mall Evening Rush (38 waiting)',
+          boardingProb: 48,
+          peakHours: '09:00 AM – 10:30 AM & 06:00 PM – 08:00 PM',
+          betterStopName: 'Satya Sai Square BRTS Stop (450m upstream)',
+          betterStopQueue: 11,
+          betterStopProb: 86,
+          tip: 'Southbound i-Buses originate from Niranjanpur/Scheme 78. Boarding at Satya Sai Square avoids the Vijay Nagar C21 bottleneck.'
+        },
+        'dhar-stand': {
+          name: 'Rajwada / Subhash Chowk City Bus Stand',
+          currentQueue: 22,
+          queueLevel: 'Moderate Market & Student Queue (22 waiting)',
+          boardingProb: 78,
+          peakHours: '09:30 AM – 11:30 AM & 05:00 PM – 07:30 PM',
+          betterStopName: 'Bada Ganpati / Regal Terminus (Originating Point)',
+          betterStopQueue: 10,
+          betterStopProb: 93,
+          tip: 'Route E-2 and M-4 buses have light occupancy at Regal/Bada Ganpati before entering central Rajwada.'
+        },
+        'rajiv-gandhi': {
+          name: 'Rajiv Gandhi Square / Crystal IT Park Hub',
+          currentQueue: 52,
+          queueLevel: 'Heavy IT Park & Rau Transfer Crowd (52 waiting)',
+          boardingProb: 34,
+          peakHours: '08:45 AM – 10:15 AM & 05:45 PM – 07:30 PM',
+          betterStopName: 'Silicon City / Rau Bypass Upstream Stop (500m upstream)',
+          betterStopQueue: 14,
+          betterStopProb: 84,
+          tip: 'Board at Silicon City or IT Park Gate before the main Rajiv Gandhi intersection crowd boards.'
+        },
+        'palasia-sq': {
+          name: 'Palasia Square / 56 Dukan BRTS Station',
+          currentQueue: 35,
+          queueLevel: 'High Office & Shopper Queue (35 waiting)',
+          boardingProb: 50,
+          peakHours: '09:15 AM – 10:45 AM & 06:00 PM – 08:30 PM',
+          betterStopName: 'Geeta Bhawan Square BRTS Stop (500m south)',
+          betterStopQueue: 12,
+          betterStopProb: 85,
+          tip: 'Northbound buses towards LIG/Vijay Nagar get packed at Palasia. Board 1 stop earlier at Geeta Bhawan for easy seating.'
+        },
+        'navlakha-sq': {
+          name: 'Navlakha Square / Inter-City & BRTS Hub',
+          currentQueue: 41,
+          queueLevel: 'Heavy Student & Regional Transfer Crowd (41 waiting)',
+          boardingProb: 42,
+          peakHours: '08:15 AM – 10:00 AM & 05:15 PM – 07:15 PM',
+          betterStopName: 'Holkar Science College BRTS Stop (420m upstream)',
+          betterStopQueue: 13,
+          betterStopProb: 84,
+          tip: 'Walk 4 mins towards Holkar Science College BRTS station to board before the Navlakha bus stand crowd enters.'
+        },
+        'lig-sq': {
+          name: 'LIG Square BRTS & Ring Road Link',
+          currentQueue: 33,
+          queueLevel: 'Moderate-High Commuter Queue (33 waiting)',
+          boardingProb: 54,
+          peakHours: '08:45 AM – 10:30 AM & 05:45 PM – 07:45 PM',
+          betterStopName: 'Industry House BRTS Stop (400m south)',
+          betterStopQueue: 11,
+          betterStopProb: 87,
+          tip: 'Passengers transferring from MR-9 and Ring Road crowd LIG Square; Industry House stop is much lighter.'
+        },
+        'radisson-sq': {
+          name: 'Radisson Square / Khajrana Ring Road Stop',
+          currentQueue: 39,
+          queueLevel: 'High Corporate & Ring Road Rush (39 waiting)',
+          boardingProb: 45,
+          peakHours: '09:00 AM – 10:30 AM & 06:00 PM – 08:00 PM',
+          betterStopName: 'Bombay Hospital Square Stop (550m north)',
+          betterStopQueue: 12,
+          betterStopProb: 86,
+          tip: 'Ring Road city buses (M-4, R-9) have open seats at Bombay Hospital before hitting the Radisson/Khajrana rush.'
+        },
+        'sarwate-stand': {
+          name: 'Sarwate Bus Stand / Indore Railway Junction',
+          currentQueue: 48,
+          queueLevel: 'Heavy Rail & Bus Terminal Crowd (48 waiting)',
+          boardingProb: 40,
+          peakHours: '07:30 AM – 10:30 AM & 05:00 PM – 08:30 PM',
+          betterStopName: 'Regal Square / पटेल प्रतिमा Stop (450m north)',
+          betterStopQueue: 15,
+          betterStopProb: 82,
+          tip: 'Walking 5 mins to Regal Square lets you catch originating city buses with higher seat availability.'
+        },
+        'super-corridor': {
+          name: 'Super Corridor (TCS Garima Park / Infosys Gate)',
+          currentQueue: 46,
+          queueLevel: 'Peak IT Shift Dispersal Queue (46 waiting)',
+          boardingProb: 39,
+          peakHours: '08:30 AM – 09:45 AM & 05:30 PM – 06:45 PM',
+          betterStopName: 'Symbiosis / Tigaria Badshah Upstream Stop (500m west)',
+          betterStopQueue: 10,
+          betterStopProb: 90,
+          tip: 'During evening shift logout at 5:45 PM, board one stop prior near Symbiosis/Narssee Monjee to lock a window seat on EV Route E-2.'
+        },
+        'medicaps-rau': {
+          name: 'Medicaps University / Rau Circle Stop',
+          currentQueue: 54,
+          queueLevel: 'Very High College Dispersal Rush (54 waiting)',
+          boardingProb: 31,
+          peakHours: '08:15 AM – 09:30 AM & 04:15 PM – 05:30 PM',
+          betterStopName: 'Pigdamber / IIM Road Stop (400m upstream)',
+          betterStopQueue: 12,
+          betterStopProb: 88,
+          tip: 'At 4:30 PM college dispersal, Pigdamber stop has 75% shorter queues than the main Rau Circle island.'
+        },
+        'bengali-sq': {
+          name: 'Bengali Square / Pipliyahana Ring Road Hub',
+          currentQueue: 34,
+          queueLevel: 'Moderate-High East Indore Crowd (34 waiting)',
+          boardingProb: 53,
+          peakHours: '08:45 AM – 10:15 AM & 05:45 PM – 07:30 PM',
+          betterStopName: 'World Cup Square / Scheme 140 Stop (450m south)',
+          betterStopQueue: 11,
+          betterStopProb: 87,
+          tip: 'Board at World Cup Square (Scheme 140) before the Kanadia Road & Bengali Flyover crowd joins.'
+        },
+        'mhow-naka': {
+          name: 'Mhow Naka / Annapurna Temple City Stop',
+          currentQueue: 29,
+          queueLevel: 'Moderate West-South Commuter Queue (29 waiting)',
+          boardingProb: 62,
+          peakHours: '08:30 AM – 10:00 AM & 05:30 PM – 07:30 PM',
+          betterStopName: 'Usha Nagar / Ranjeet Hanuman Stop (380m west)',
+          betterStopQueue: 9,
+          betterStopProb: 91,
+          tip: 'Feeder buses towards Rajwada and Bhawarkuan have plenty of seats at Ranjeet Hanuman Road.'
+        },
+        'dewas-naka': {
+          name: 'Dewas Naka / Lasudia Industrial Hub',
+          currentQueue: 42,
+          queueLevel: 'High Industrial & Warehouse Shift Crowd (42 waiting)',
+          boardingProb: 41,
+          peakHours: '08:00 AM – 09:30 AM & 05:30 PM – 07:00 PM',
+          betterStopName: 'Niranjanpur BRTS Terminus (600m south)',
+          betterStopQueue: 14,
+          betterStopProb: 92,
+          tip: 'Walk or take a 2-min shared auto to Niranjanpur BRTS Terminus where every i-Bus starts completely empty!'
+        },
+        'mr10-isbt': {
+          name: 'MR-10 ISBT / Aurobindo Hospital Stop',
+          currentQueue: 37,
+          queueLevel: 'High Medical & Inter-City Feeder Crowd (37 waiting)',
+          boardingProb: 49,
+          peakHours: '08:30 AM – 10:30 AM & 05:00 PM – 07:00 PM',
+          betterStopName: 'Kushabhau Thakre ISBT Platform-1 (Originating)',
+          betterStopQueue: 12,
+          betterStopProb: 90,
+          tip: 'Board inside MR-10 ISBT Platform-1 rather than the main highway curb outside Aurobindo gate.'
+        },
+        'tower-sapna': {
+          name: 'Tower Square / Sapna Sangeeta City Stop',
+          currentQueue: 27,
+          queueLevel: 'Moderate Coaching & Market Crowd (27 waiting)',
+          boardingProb: 64,
+          peakHours: '09:00 AM – 11:00 AM & 05:30 PM – 08:00 PM',
+          betterStopName: 'Agrasen Square Stop (350m upstream)',
+          betterStopQueue: 10,
+          betterStopProb: 88,
+          tip: 'Route R-5 and M-14 midi buses have open seats at Agrasen Square before reaching Sapna Sangeeta.'
+        }
+      },
+      carpools: [
+        {
+          id: 'cp-1',
+          driver: 'Ankit Tiwari (TCS / IT Park Verified)',
+          corridor: 'Dhar ↔ Indore',
+          routeDetail: 'Dhar Mohan Talkies → Betma → Rajendra Nagar → Bhawarkuan IT Park',
+          depTime: '08:15 AM',
+          vehicle: 'Maruti Swift Dzire (AC)',
+          seatsLeft: 2,
+          pricePerSeat: 90,
+          rating: '4.9 ★ (64 rides)'
+        },
+        {
+          id: 'cp-2',
+          driver: 'Sneha Joshi (Medicaps Faculty)',
+          corridor: 'Mhow ↔ Rau ↔ Indore',
+          routeDetail: 'Mhow Naka → Kishanganj → Medicaps University → Rau Circle',
+          depTime: '08:30 AM',
+          vehicle: 'Tata Nexon EV (Zero Emission)',
+          seatsLeft: 3,
+          pricePerSeat: 45,
+          rating: '5.0 ★ (41 rides)'
+        },
+        {
+          id: 'cp-3',
+          driver: 'Suresh Parmar (Lupin Pithampur)',
+          corridor: 'Indore ↔ Pithampur',
+          routeDetail: 'Bhawarkuan → Rau Bypass → Pithampur Sec-3 & SEZ Gate 2',
+          depTime: '08:05 AM',
+          vehicle: 'Shared Mahindra Marazzo (AC Cab)',
+          seatsLeft: 4,
+          pricePerSeat: 60,
+          rating: '4.8 ★ (112 rides)'
+        },
+        {
+          id: 'cp-4',
+          driver: 'Harshvardhan R. (IET DAVV Student)',
+          corridor: 'Dhar ↔ Indore',
+          routeDetail: 'Dhar Bus Stand → Ghatabillod → IET DAVV / Khandelwal Nagar',
+          depTime: '08:40 AM',
+          vehicle: 'Hyundai i20 (AC)',
+          seatsLeft: 1,
+          pricePerSeat: 85,
+          rating: '4.7 ★ (29 rides)'
+        },
+        {
+          id: 'cp-5',
+          driver: 'Karan Solanki (Force Motors Engg)',
+          corridor: 'Indore ↔ Pithampur',
+          routeDetail: 'Rajwada → Mhow Naka → Rau → Pithampur Sector-1',
+          depTime: '07:50 AM',
+          vehicle: '2-Wheeler Bike Pool (Helmet Provided)',
+          seatsLeft: 1,
+          pricePerSeat: 35,
+          rating: '4.9 ★ (53 rides)'
+        }
+      ],
+      rewards: [
+        {
+          id: 'rw-1',
+          title: 'Flat 25% OFF Monthly Regional Bus Pass',
+          reqText: 'Unlocks at 100-Day Streak (Weekend Protected)',
+          minStreak: 100,
+          costKm: 0,
+          code: 'RAAH100PASS'
+        },
+        {
+          id: 'rw-2',
+          title: '₹120 P2P Carpool Ride Split Credit',
+          reqText: 'Redeem with 400 KM Points',
+          minStreak: 0,
+          costKm: 400,
+          code: 'POOL120FREE'
+        },
+        {
+          id: 'rw-3',
+          title: 'Priority Morning Seat Lock (5 Rides)',
+          reqText: 'Redeem with 250 KM Points',
+          minStreak: 0,
+          costKm: 250,
+          code: 'SEATLOCK5'
+        },
+        {
+          id: 'rw-4',
+          title: 'Free Highway Kullad Chai & Poha Combo',
+          reqText: 'Partner Stall at Betma / Rau Bypass (150 KM Pts)',
+          minStreak: 0,
+          costKm: 150,
+          code: 'CHAIPOHA26'
+        }
+      ]
+    };
+
+    // ==========================================
+    // UTILITY: TOAST NOTIFICATION
+    // ==========================================
+    let toastTimer = null;
+    function showToast(message, icon = '✅') {
+      const toast = document.getElementById('toastContainer');
+      document.getElementById('toastIcon').textContent = icon;
+      document.getElementById('toastMessage').textContent = message;
+      toast.classList.remove('hidden');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 3600);
+    }
+
+    function updateHeaderCounters() {
+      document.getElementById('headerStreakCount').textContent = state.streakDays;
+      document.getElementById('headerRepPoints').textContent = state.repPoints;
+      document.getElementById('headerKmPoints').textContent = state.kmPoints.toLocaleString();
+      document.getElementById('navCarpoolCount').textContent = state.carpools.length;
+    }
+
+    // ==========================================
+    // RENDER: ROUTES & 3 RECOMMENDATION MODES
+    // ==========================================
+    function renderRoutes() {
+      const origin = document.getElementById('originSelect').value;
+      const dest = document.getElementById('destSelect').value;
+      document.getElementById('activeCorridorLabel').textContent = `${origin} → ${dest}`;
+      const gmapRouteLbl = document.getElementById('gmapFloatingRouteText');
+      if (gmapRouteLbl) gmapRouteLbl.textContent = `${origin} → ${dest}`;
+
+      const modeHeadings = {
+        'least-wait': 'Recommended Transit Routes (Sorted by Least Waiting Time ⚡)',
+        'cheapest': 'Recommended Transit Routes (Sorted by Cheapest Fare 💰)',
+        'fewest-changes': 'Recommended Transit Routes (Sorted by Fewest Bus Changes 🔄)'
+      };
+      document.getElementById('routeListHeading').textContent = modeHeadings[state.recMode];
+
+      const sorted = [...state.routes].sort((a, b) => {
+        if (state.recMode === 'least-wait') return a.waitMins - b.waitMins;
+        if (state.recMode === 'cheapest') return a.fare - b.fare;
+        return a.transfers - b.transfers || a.waitMins - b.waitMins;
+      });
+
+      const container = document.getElementById('routesContainer');
+      container.innerHTML = sorted.map((rt, idx) => {
+        const isHeld = !!state.heldSeats[rt.id];
+        const badgeMap = {
+          'least-wait': '⚡ Fastest Pickup',
+          'cheapest': '💰 Best Budget Fare',
+          'fewest-changes': '🔄 Zero Hassle Direct'
+        };
+        const topBadge = idx === 0
+          ? `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-amber-400 text-slate-950">${badgeMap[state.recMode]}</span>`
+          : '';
+
+        const crowdBadgeClass = rt.crowdColor === 'emerald'
+          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+          : rt.crowdColor === 'rose'
+          ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+          : 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+
+        const barClass = rt.crowdColor === 'emerald'
+          ? 'bg-emerald-400'
+          : rt.crowdColor === 'rose'
+          ? 'bg-rose-500'
+          : 'bg-amber-400';
+
+        return `
+          <div class="bg-slate-900 border ${idx === 0 ? 'border-amber-500/60' : 'border-slate-800'} rounded-2xl p-4 sm:p-5 transition hover:border-slate-700">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div class="flex items-center gap-2 flex-wrap">
+                ${topBadge}
+                <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700">${rt.busNo}</span>
+                <h3 class="text-sm sm:text-base font-bold text-white">${rt.name}</h3>
+              </div>
+              <div class="text-right">
+                <span class="text-lg font-extrabold text-amber-400">₹${rt.fare}</span>
+                <span class="text-[11px] text-slate-400 block">${rt.durationMins} mins total</span>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 my-3 bg-slate-800/60 rounded-xl p-2.5 text-xs">
+              <div>
+                <span class="text-slate-400 block text-[10px] uppercase">Next Bus Wait</span>
+                <strong class="text-white">In ${rt.waitMins} mins</strong>
+              </div>
+              <div>
+                <span class="text-slate-400 block text-[10px] uppercase">Bus Changes</span>
+                <strong class="text-white">${rt.transfers === 0 ? 'Direct (0 Changes)' : rt.transfers + ' Transfer (Rau)'}</strong>
+              </div>
+              <div>
+                <span class="text-slate-400 block text-[10px] uppercase">Est. Occupancy</span>
+                <span class="inline-block px-2 py-0.5 rounded border text-[11px] font-semibold ${crowdBadgeClass}">${rt.crowdLabel}</span>
+              </div>
+            </div>
+
+            <!-- Occupancy Visual Bar -->
+            <div class="mb-3">
+              <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+                <span>📡 ${rt.delayText}</span>
+                <span>Est. Fill: ${rt.crowdPct}% (Not Guaranteed Seat)</span>
+              </div>
+              <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div class="${barClass} h-full rounded-full" style="width: ${rt.crowdPct}%"></div>
+              </div>
+            </div>
+
+            <!-- Step by step leg breakdown -->
+            <div class="text-xs text-slate-300 space-y-1 mb-3 pl-2 border-l-2 border-slate-700">
+              <div>• <strong>Board at:</strong> ${origin} (${rt.transfers === 0 ? 'Direct Platform' : 'Feeder Bay'})</div>
+              <div>• <strong>Transit Corridor:</strong> ${rt.steps[1]}</div>
+              <div>• <strong>Alight at:</strong> ${dest}</div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+              <span class="text-xs text-slate-400">
+                🎫 Regular Pass Quota: <strong class="text-emerald-400">${isHeld ? rt.seatsHoldable - 1 : rt.seatsHoldable} window/commuter slots left</strong>
+              </span>
+              <button type="button" data-holdbus="${rt.id}" class="hold-seat-btn px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+                isHeld
+                  ? 'bg-emerald-500 text-slate-950'
+                  : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30'
+              }">
+                ${isHeld ? '✅ Commuter Seat Held (Pass #DL-884)' : '🔒 Hold Daily Commuter Seat'}
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      container.querySelectorAll('.hold-seat-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-holdbus');
+          if (!state.commuterPassActive) {
+            showToast('Enable Daily Commuter Pass Mode at the top to hold a regular seat!', '⚠️');
+            return;
+          }
+          state.heldSeats[id] = !state.heldSeats[id];
+          renderRoutes();
+          if (state.heldSeats[id]) {
+            showToast('Commuter Pass Seat Held for 15 mins prior to boarding!', '🎫');
+          } else {
+            showToast('Seat hold released for fellow passengers.', 'ℹ️');
+          }
+        });
+      });
+    }
+
+    // ==========================================
+    // RENDER: LIVE VERIFIED COMMUNITY FEED
+    // ==========================================
+    function renderReportsFeed() {
+      const container = document.getElementById('liveReportsFeed');
+      const filtered = state.reports.filter(r => {
+        if (state.feedFilter === 'verified') return r.confirmations >= 3;
+        if (state.feedFilter === 'delays') return r.delay.toLowerCase().includes('delay') || r.delay.toLowerCase().includes('jam');
+        return true;
+      });
+
+      container.innerHTML = filtered.map(r => {
+        const isFullyVerified = r.confirmations >= 3;
+        return `
+          <div class="bg-slate-800/75 border ${isFullyVerified ? 'border-emerald-500/40' : 'border-slate-700'} rounded-xl p-3.5 space-y-2">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <span class="text-xs font-bold text-white block">${r.route}</span>
+                <span class="text-[11px] text-slate-400">By ${r.author} • ${r.timeAgo}</span>
+              </div>
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                isFullyVerified
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+              }">
+                ${isFullyVerified ? '✅ Verified (' + r.confirmations + '/3)' : '⏳ Pending (' + r.confirmations + '/3)'}
+              </span>
+            </div>
+
+            <div class="flex flex-wrap gap-1.5 text-[11px]">
+              <span class="px-2 py-0.5 rounded bg-slate-900 text-amber-300 font-semibold">⏱️ ${r.delay}</span>
+              <span class="px-2 py-0.5 rounded bg-slate-900 text-sky-300 font-semibold">👥 Est. ${r.crowd}</span>
+              ${r.gpsVerified ? '<span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/50">📍 GPS Proximity Match</span>' : ''}
+              ${r.operatorVerified ? '<span class="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-700/50">🛰️ Operator Telemetry</span>' : ''}
+            </div>
+
+            <p class="text-xs text-slate-200 leading-relaxed">"${r.note}"</p>
+
+            <div class="flex items-center justify-between pt-1.5 border-t border-slate-700/60 text-xs">
+              <span class="text-[11px] text-slate-400">Independent confirmations: <strong>${r.confirmations}</strong></span>
+              <button type="button" data-confirmid="${r.id}" class="confirm-report-btn px-2.5 py-1 rounded-lg font-semibold transition ${
+                r.userConfirmed
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  : 'bg-slate-700 hover:bg-slate-600 text-white'
+              }">
+                ${r.userConfirmed ? '✓ Confirmed (+5 Pts Earned)' : '👍 Confirm Accuracy (+5 Rep Pts)'}
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      container.querySelectorAll('.confirm-report-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const repId = btn.getAttribute('data-confirmid');
+          const item = state.reports.find(x => x.id === repId);
+          if (!item || item.userConfirmed) return;
+          item.userConfirmed = true;
+          item.confirmations += 1;
+          state.repPoints += 5;
+          updateHeaderCounters();
+          renderReportsFeed();
+          showToast('Report confirmed via GPS proximity! You earned +5 Scout Reputation Points.', '⭐');
+        });
+      });
+    }
+
+    // ==========================================
+    // RENDER: BUS STOP CROWD & BOARDING ADVISOR
+    // ==========================================
+    function renderStopAdvisor() {
+      const key = document.getElementById('stopAdvisorSelect').value;
+      const stop = state.stopsData[key];
+      const container = document.getElementById('stopAdvisorDetailContainer');
+
+      const probColor = stop.boardingProb >= 70 ? 'text-emerald-400' : stop.boardingProb >= 50 ? 'text-amber-400' : 'text-rose-400';
+
+      container.innerHTML = `
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <!-- Selected Stop Status -->
+          <div class="lg:col-span-6 bg-slate-800/70 border border-slate-700 rounded-2xl p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs uppercase font-bold text-slate-400">Current Selected Stop</span>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">Live Stop Sensor + Crowd</span>
+            </div>
+            <h3 class="text-base font-bold text-white">${stop.name}</h3>
+            <div class="grid grid-cols-2 gap-3 bg-slate-900/80 rounded-xl p-3">
+              <div>
+                <div class="text-[11px] text-slate-400">Est. Queue Waiting Now</div>
+                <div class="text-xl font-extrabold text-white mt-0.5">~${stop.currentQueue} people</div>
+                <div class="text-[11px] text-amber-300 mt-0.5">${stop.queueLevel}</div>
+              </div>
+              <div>
+                <div class="text-[11px] text-slate-400">Seat / Boarding Chance</div>
+                <div class="text-xl font-extrabold ${probColor} mt-0.5">${stop.boardingProb}% Chance</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Peak: ${stop.peakHours}</div>
+              </div>
+            </div>
+
+            <!-- Hourly Queue Simulation Bar -->
+            <div>
+              <div class="text-xs font-semibold text-slate-300 mb-2">Typical Morning Queue Crowd by Time Window:</div>
+              <div class="grid grid-cols-5 gap-2 text-center text-[11px]">
+                <div class="bg-slate-900 p-2 rounded-lg">
+                  <div class="text-emerald-400 font-bold">30%</div>
+                  <div class="text-slate-400">07:30 AM</div>
+                </div>
+                <div class="bg-slate-900 p-2 rounded-lg">
+                  <div class="text-amber-400 font-bold">65%</div>
+                  <div class="text-slate-400">08:15 AM</div>
+                </div>
+                <div class="bg-rose-950/60 border border-rose-500/40 p-2 rounded-lg">
+                  <div class="text-rose-400 font-bold">92% Peak</div>
+                  <div class="text-slate-200">08:45 AM</div>
+                </div>
+                <div class="bg-slate-900 p-2 rounded-lg">
+                  <div class="text-amber-400 font-bold">70%</div>
+                  <div class="text-slate-400">09:30 AM</div>
+                </div>
+                <div class="bg-slate-900 p-2 rounded-lg">
+                  <div class="text-emerald-400 font-bold">35%</div>
+                  <div class="text-slate-400">10:15 AM</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Smart Nearby Alternative Stop Recommendation -->
+          <div class="lg:col-span-6 bg-gradient-to-br from-emerald-950/50 to-slate-900 border border-emerald-500/40 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500 text-slate-950">💡 Better Boarding Alternative Nearby</span>
+                <span class="text-xs text-emerald-300 font-semibold">+${stop.betterStopProb - stop.boardingProb}% Higher Boarding Chance</span>
+              </div>
+              <h3 class="text-base font-bold text-white">${stop.betterStopName}</h3>
+              <p class="text-xs text-slate-300 mt-2 leading-relaxed">${stop.tip}</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 bg-slate-900/90 rounded-xl p-3 border border-emerald-500/20">
+              <div>
+                <div class="text-[11px] text-slate-400">Queue at Nearby Stop</div>
+                <div class="text-xl font-extrabold text-emerald-400">Only ~${stop.betterStopQueue} waiting</div>
+              </div>
+              <div>
+                <div class="text-[11px] text-slate-400">Boarding / Seat Probability</div>
+                <div class="text-xl font-extrabold text-emerald-400">${stop.betterStopProb}% (High)</div>
+              </div>
+            </div>
+
+            <button id="checkInStopQueueBtn" type="button" class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition">
+              📍 I'm at this Stop — Confirm Queue Level (+10 Rep Pts)
+            </button>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('checkInStopQueueBtn').addEventListener('click', () => {
+        state.repPoints += 10;
+        updateHeaderCounters();
+        showToast(`Stop queue verified for ${stop.name}! +10 Scout Reputation Points added.`, '🚏');
+      });
+    }
+
+    // ==========================================
+    // RENDER: P2P CARPOOL & CAB SHARING
+    // ==========================================
+    function renderCarpools() {
+      const corridorFilter = document.getElementById('carpoolFilterCorridor').value;
+      const container = document.getElementById('carpoolListContainer');
+
+      const filtered = state.carpools.filter(c => corridorFilter === 'ALL' || c.corridor === corridorFilter);
+
+      container.innerHTML = filtered.map(cp => {
+        const joined = !!state.joinedCarpools[cp.id];
+        return `
+          <div class="bg-slate-800/70 border ${joined ? 'border-emerald-500/50' : 'border-slate-700'} rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div class="space-y-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[11px] font-bold">${cp.corridor}</span>
+                <h4 class="text-sm font-bold text-white">${cp.driver}</h4>
+                <span class="text-xs text-emerald-400 font-semibold">${cp.rating}</span>
+              </div>
+              <p class="text-xs text-slate-300">🛣️ ${cp.routeDetail}</p>
+              <div class="flex flex-wrap items-center gap-3 text-xs text-slate-400 pt-1">
+                <span>🕒 Departs: <strong class="text-white">${cp.depTime}</strong></span>
+                <span>🚘 Vehicle: <strong class="text-white">${cp.vehicle}</strong></span>
+                <span>💺 Seats Open: <strong class="text-emerald-400">${cp.seatsLeft}</strong></span>
+              </div>
+            </div>
+
+            <div class="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-2 border-t sm:border-t-0 border-slate-700 pt-2 sm:pt-0">
+              <div class="text-left sm:text-right">
+                <span class="text-lg font-extrabold text-amber-400">₹${cp.pricePerSeat}</span>
+                <span class="text-[10px] text-slate-400 block">per seat split</span>
+              </div>
+              <button type="button" data-carpoolid="${cp.id}" class="join-carpool-btn px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+                joined
+                  ? 'bg-emerald-500 text-slate-950'
+                  : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+              }">
+                ${joined ? '✅ Seat Requested' : '🤝 Join Shared Ride'}
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      container.querySelectorAll('.join-carpool-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-carpoolid');
+          const ride = state.carpools.find(c => c.id === id);
+          if (!ride) return;
+          if (!state.joinedCarpools[id]) {
+            if (ride.seatsLeft <= 0) {
+              showToast('No seats left in this carpool!', '⚠️');
+              return;
+            }
+            state.joinedCarpools[id] = true;
+            ride.seatsLeft -= 1;
+            showToast(`Seat reserved with ${ride.driver} for ₹${ride.pricePerSeat}!`, '🚗');
+          } else {
+            state.joinedCarpools[id] = false;
+            ride.seatsLeft += 1;
+            showToast('Carpool seat booking cancelled.', 'ℹ️');
+          }
+          renderCarpools();
+        });
+      });
+    }
+
+    // ==========================================
+    // RENDER: DAILY & MONTHLY COST COMPARATOR
+    // ==========================================
+    function renderCostComparator() {
+      const dist = parseInt(document.getElementById('calcDistSlider').value, 10);
+      const days = parseInt(document.getElementById('calcDaysSlider').value, 10);
+
+      document.getElementById('calcDistVal').textContent = dist;
+      document.getElementById('calcDaysVal').textContent = days;
+      document.getElementById('calcStreakStatusLabel').textContent = state.calcDiscountActive
+        ? '20% Streak Discount ON'
+        : 'Standard Fare (No Discount)';
+
+      const discountFactor = state.calcDiscountActive ? 0.8 : 1.0;
+
+      // Round-trip daily costs based on distance
+      const busDailyRaw = Math.round(dist * 2.2);
+      const busDaily = Math.round(busDailyRaw * discountFactor);
+      const busMonthly = busDaily * days;
+
+      const busAutoDaily = Math.round(busDaily + 40); // +₹20 each way shared auto
+      const busAutoMonthly = busAutoDaily * days;
+
+      const carpoolDaily = Math.round(dist * 4.4 * (state.calcDiscountActive ? 0.9 : 1.0));
+      const carpoolMonthly = carpoolDaily * days;
+
+      const modes = [
+        {
+          title: '🚌 Regional Bus Only',
+          tag: 'Most Economical',
+          daily: busDaily,
+          monthly: busMonthly,
+          time: `${Math.round(dist * 1.9)} mins each way`,
+          comfort: 'Moderate (Pass Seat Lock Recommended)',
+          highlight: true,
+          note: state.calcDiscountActive ? 'Includes 20% 100-Streak Pass Discount!' : 'Enable Streak Discount to save 20% more'
+        },
+        {
+          title: '🚌 + 🛺 Bus + Shared Auto',
+          tag: 'Balanced Last-Mile',
+          daily: busAutoDaily,
+          monthly: busAutoMonthly,
+          time: `${Math.round(dist * 1.65)} mins each way`,
+          comfort: 'Good (Door-to-Gate Shared Tempo)',
+          highlight: false,
+          note: 'Covers highway drop + ₹20 shared auto to campus/plant gate'
+        },
+        {
+          title: '🚗 Peer-to-Peer Carpool',
+          tag: 'Fastest & AC Comfort',
+          daily: carpoolDaily,
+          monthly: carpoolMonthly,
+          time: `${Math.round(dist * 1.25)} mins each way`,
+          comfort: 'High (Guaranteed AC Car Seat, 0 Transfers)',
+          highlight: false,
+          note: '70% cheaper than solo cab; verified co-commuters'
+        }
+      ];
+
+      const container = document.getElementById('costCardsContainer');
+      container.innerHTML = modes.map(m => `
+        <div class="bg-slate-800/80 border ${m.highlight ? 'border-amber-400' : 'border-slate-700'} rounded-2xl p-4 flex flex-col justify-between space-y-3">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-bold uppercase px-2 py-0.5 rounded ${m.highlight ? 'bg-amber-400 text-slate-950' : 'bg-slate-700 text-slate-300'}">${m.tag}</span>
+              <span class="text-xs text-slate-400">${days} days/mo</span>
+            </div>
+            <h3 class="text-base font-bold text-white">${m.title}</h3>
+            <div class="mt-3 grid grid-cols-2 gap-2 bg-slate-900 rounded-xl p-3">
+              <div>
+                <div class="text-[10px] uppercase text-slate-400">Est. Daily (Round-Trip)</div>
+                <div class="text-lg font-extrabold text-white">₹${m.daily}</div>
+              </div>
+              <div>
+                <div class="text-[10px] uppercase text-slate-400">Est. Monthly Total</div>
+                <div class="text-lg font-extrabold text-amber-400">₹${m.monthly.toLocaleString()}</div>
+              </div>
+            </div>
+          </div>
+          <div class="text-xs text-slate-300 space-y-1 pt-2 border-t border-slate-700/70">
+            <div>⏱️ <strong>Avg Travel Time:</strong> ${m.time}</div>
+            <div>💺 <strong>Comfort:</strong> ${m.comfort}</div>
+            <div class="text-emerald-400 text-[11px] pt-1">✨ ${m.note}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // ==========================================
+    // RENDER: STREAKS, HOLIDAY PROTECTION & REWARDS
+    // ==========================================
+    function renderStreaksAndRewards() {
+      document.getElementById('streakBigNumber').textContent = state.streakDays;
+      document.getElementById('totalKmDisplay').textContent = `${state.kmPoints.toLocaleString()} km`;
+      const pct = Math.min(100, state.streakDays);
+      document.getElementById('streakProgressBar').style.width = `${pct}%`;
+
+      const remaining = Math.max(0, 100 - state.streakDays);
+      document.getElementById('streakMilestoneStatus').textContent = remaining === 0
+        ? '🎉 100-Day Milestone Unlocked! Claim your Flat 25% Pass Discount on the right!'
+        : `Just ${remaining} more commute day${remaining === 1 ? '' : 's'} to unlock Flat 25% Pass Discount!`;
+
+      // Render 14-day calendar strip showing weekend protection
+      const daysSample = [
+        { d: 'Mon', type: 'work' }, { d: 'Tue', type: 'work' }, { d: 'Wed', type: 'work' },
+        { d: 'Thu', type: 'work' }, { d: 'Fri', type: 'work' }, { d: 'Sat', type: 'sat' }, { d: 'Sun', type: 'sun' },
+        { d: 'Mon', type: 'work' }, { d: 'Tue', type: 'work' }, { d: 'Wed', type: 'work' },
+        { d: 'Thu', type: 'work' }, { d: 'Fri', type: 'work' }, { d: 'Sat', type: 'sat2' }, { d: 'Sun', type: 'sun' }
+      ];
+
+      const calGrid = document.getElementById('streakCalendarGrid');
+      calGrid.innerHTML = daysSample.map((item, idx) => {
+        let isHoliday = false;
+        if (item.type === 'sun') isHoliday = true;
+        if (item.type === 'sat' && state.scheduleType === 'sat-sun') isHoliday = true;
+        if (item.type === 'sat2' && (state.scheduleType === 'sat-sun' || state.scheduleType === 'alt-sat')) isHoliday = true;
+
+        return `
+          <div class="p-2 rounded-xl border text-xs ${
+            isHoliday
+              ? 'bg-indigo-950/60 border-indigo-500/40 text-indigo-300'
+              : 'bg-emerald-950/50 border-emerald-500/40 text-emerald-300'
+          }">
+            <div class="font-bold text-[10px] uppercase">${item.d} #${idx + 1}</div>
+            <div class="text-sm my-0.5">${isHoliday ? '🛡️' : '🔥'}</div>
+            <div class="text-[10px]">${isHoliday ? 'Off Safe' : '+32 KM'}</div>
+          </div>
+        `;
+      }).join('');
+
+      // Render Rewards Store
+      const rwContainer = document.getElementById('rewardsListContainer');
+      rwContainer.innerHTML = state.rewards.map(rw => {
+        const claimed = !!state.claimedRewards[rw.id];
+        const canUnlock = state.streakDays >= rw.minStreak && state.kmPoints >= rw.costKm;
+        return `
+          <div class="bg-slate-800/80 border ${claimed ? 'border-emerald-500/50' : 'border-slate-700'} rounded-xl p-3.5 flex items-center justify-between gap-3">
+            <div>
+              <h4 class="text-xs sm:text-sm font-bold text-white">${rw.title}</h4>
+              <p class="text-[11px] text-slate-400">${rw.reqText}</p>
+              ${claimed ? `<span class="inline-block mt-1 px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[11px] font-bold">Coupon: ${rw.code}</span>` : ''}
+            </div>
+            <button type="button" data-rewardid="${rw.id}" class="claim-reward-btn px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+              claimed
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                : canUnlock
+                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                : 'bg-slate-700 text-slate-400 cursor-not-allowed'
+            }">
+              ${claimed ? '✓ Claimed' : canUnlock ? 'Redeem Now' : `Need ${rw.minStreak}d Streak`}
+            </button>
+          </div>
+        `;
+      }).join('');
+
+      rwContainer.querySelectorAll('.claim-reward-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-rewardid');
+          const rw = state.rewards.find(r => r.id === id);
+          if (!rw || state.claimedRewards[id]) return;
+          if (state.streakDays < rw.minStreak) {
+            showToast(`Log ${rw.minStreak - state.streakDays} more commute day(s) to unlock the 100-Day Streak Discount!`, '🔥');
+            return;
+          }
+          if (state.kmPoints < rw.costKm) {
+            showToast('Not enough KM points yet!', '⚠️');
+            return;
+          }
+          state.kmPoints -= rw.costKm;
+          state.claimedRewards[id] = true;
+          updateHeaderCounters();
+          renderStreaksAndRewards();
+          showToast(`Unlocked "${rw.title}"! Use code ${rw.code}.`, '🎁');
+        });
+      });
+    }
+
+    // ==========================================
+    // EVENT BINDINGS & INITIALIZATION
+    // ==========================================
+    window.addEventListener('DOMContentLoaded', () => {
+      // Tab switching
+      const tabBtns = document.querySelectorAll('.nav-tab-btn');
+      const tabPanels = document.querySelectorAll('.tab-panel');
+      function switchTab(targetId) {
+        tabPanels.forEach(p => {
+          p.classList.toggle('hidden', p.id !== targetId);
+        });
+        tabBtns.forEach(b => {
+          const active = b.getAttribute('data-tab') === targetId;
+          b.className = `nav-tab-btn px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition whitespace-nowrap ${
+            active ? 'bg-amber-500 text-slate-950' : 'bg-slate-800/70 text-slate-300 hover:bg-slate-800'
+          }`;
+        });
+      }
+
+      tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => switchTab(btn.getAttribute('data-tab')));
+      });
+
+      document.getElementById('openStreakTabBtn').addEventListener('click', () => switchTab('tab-streaks'));
+      document.getElementById('openRepModalBtn').addEventListener('click', () => {
+        showToast(`Scout Reputation: ${state.repPoints} pts • Verified accuracy rate: 96%`, '⭐');
+      });
+
+      // Origin / Destination changes & swap
+      document.getElementById('originSelect').addEventListener('change', renderRoutes);
+      document.getElementById('destSelect').addEventListener('change', renderRoutes);
+      document.getElementById('swapRouteBtn').addEventListener('click', () => {
+        const o = document.getElementById('originSelect');
+        const d = document.getElementById('destSelect');
+        const temp = o.selectedIndex;
+        o.selectedIndex = d.selectedIndex;
+        d.selectedIndex = temp;
+        renderRoutes();
+        showToast('Swapped Origin & Destination corridor!', '⇄');
+      });
+
+      // Commuter Pass Toggle
+      document.getElementById('commuterPassToggle').addEventListener('click', () => {
+        state.commuterPassActive = !state.commuterPassActive;
+        const btn = document.getElementById('commuterPassToggle');
+        if (state.commuterPassActive) {
+          btn.className = 'w-full px-3.5 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center justify-between hover:bg-emerald-500/25 transition';
+          btn.innerHTML = '<span>🎫 Pass Holder Mode: ON</span><span class="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px]">ACTIVE</span>';
+        } else {
+          btn.className = 'w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-400 text-xs font-bold flex items-center justify-between transition';
+          btn.innerHTML = '<span>🎫 Pass Holder Mode: OFF</span><span class="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px]">OFF</span>';
+        }
+      });
+
+      // 3 Recommendation Mode Buttons
+      document.querySelectorAll('.rec-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.recMode = btn.getAttribute('data-rec');
+          document.querySelectorAll('.rec-mode-btn').forEach(b => {
+            const active = b.getAttribute('data-rec') === state.recMode;
+            b.className = `rec-mode-btn px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+              active ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:text-white'
+            }`;
+          });
+          renderRoutes();
+        });
+      });
+
+      // Feed Filters
+      document.querySelectorAll('.feed-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.feedFilter = btn.getAttribute('data-feedfilter');
+          document.querySelectorAll('.feed-filter-btn').forEach(b => {
+            const active = b.getAttribute('data-feedfilter') === state.feedFilter;
+            b.className = `feed-filter-btn text-xs px-2.5 py-1 rounded-md font-semibold ${
+              active ? 'bg-slate-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
+            }`;
+          });
+          renderReportsFeed();
+        });
+      });
+
+      // Report Modal Open/Close/Submit
+      const reportModal = document.getElementById('reportModal');
+      const openModal = () => {
+        reportModal.classList.remove('hidden');
+        reportModal.classList.add('flex');
+      };
+      const closeModal = () => {
+        reportModal.classList.add('hidden');
+        reportModal.classList.remove('flex');
+      };
+      document.getElementById('openReportModalBtn').addEventListener('click', openModal);
+      document.getElementById('quickPostBtnRight').addEventListener('click', openModal);
+      document.getElementById('closeReportModalBtn').addEventListener('click', closeModal);
+      document.getElementById('cancelReportModalBtn').addEventListener('click', closeModal);
+
+      document.getElementById('submitReportForm').addEventListener('submit', e => {
+        e.preventDefault();
+        const route = document.getElementById('reportRouteSelect').value;
+        const delay = document.getElementById('reportDelaySelect').value;
+        const crowd = document.getElementById('reportCrowdSelect').value;
+        const note = document.getElementById('reportNoteInput').value.trim();
+
+        state.reports.unshift({
+          id: 'rep-' + Date.now(),
+          route,
+          author: 'You (Verified Commuter)',
+          timeAgo: 'Just now',
+          delay,
+          crowd,
+          note: note || 'Updated live status from corridor.',
+          confirmations: 3,
+          gpsVerified: true,
+          operatorVerified: true,
+          userConfirmed: true
+        });
+        state.repPoints += 15;
+        updateHeaderCounters();
+        renderReportsFeed();
+        closeModal();
+        showToast('Live report published & GPS-verified! +15 Scout Reputation Points earned.', '📢');
+      });
+
+      // Stop Advisor Select
+      document.getElementById('stopAdvisorSelect').addEventListener('change', renderStopAdvisor);
+
+      // Carpool Filter & Offer Form
+      document.getElementById('carpoolFilterCorridor').addEventListener('change', renderCarpools);
+      document.getElementById('offerRideForm').addEventListener('submit', e => {
+        e.preventDefault();
+        const driver = document.getElementById('rideDriverName').value.trim();
+        const corridor = document.getElementById('rideCorridor').value;
+        const depTime = document.getElementById('rideTime').value.trim();
+        const vehicle = document.getElementById('rideVehicle').value;
+        const seatsLeft = parseInt(document.getElementById('rideSeats').value, 10) || 2;
+        const pricePerSeat = parseInt(document.getElementById('ridePrice').value, 10) || 75;
+
+        state.carpools.unshift({
+          id: 'cp-' + Date.now(),
+          driver: driver || 'Verified Commuter',
+          corridor,
+          routeDetail: `${corridor} Direct Daily Commuter Pool`,
+          depTime,
+          vehicle,
+          seatsLeft,
+          pricePerSeat,
+          rating: '5.0 ★ (New Host)'
+        });
+        state.repPoints += 20;
+        updateHeaderCounters();
+        renderCarpools();
+        showToast('Carpool ride published! You earned +20 Reputation Points.', '🚗');
+      });
+
+      // Cost Comparator Controls
+      document.getElementById('calcDistSlider').addEventListener('input', renderCostComparator);
+      document.getElementById('calcDaysSlider').addEventListener('input', renderCostComparator);
+      document.getElementById('toggleCalcDiscountBtn').addEventListener('click', () => {
+        state.calcDiscountActive = !state.calcDiscountActive;
+        renderCostComparator();
+      });
+
+      // Streak Check-In & Holiday Protection Schedule Type
+      document.getElementById('simulateCheckinBtn').addEventListener('click', () => {
+        state.streakDays += 1;
+        state.kmPoints += 32;
+        state.repPoints += 10;
+        updateHeaderCounters();
+        renderStreaksAndRewards();
+        if (state.streakDays === 100) {
+          showToast('🎉 100-DAY STREAK ACHIEVED! You unlocked the Flat 25% Monthly Pass Discount!', '🏆');
+        } else {
+          showToast(`Commute logged! Streak is now ${state.streakDays} days (+32 KM Points).`, '🔥');
+        }
+      });
+
+      document.querySelectorAll('.sched-type-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.scheduleType = btn.getAttribute('data-sched');
+          document.querySelectorAll('.sched-type-btn').forEach(b => {
+            const active = b.getAttribute('data-sched') === state.scheduleType;
+            b.className = `sched-type-btn p-3 rounded-xl border text-left transition ${
+              active
+                ? 'bg-amber-500/15 border-amber-400 text-white'
+                : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
+            }`;
+          });
+          renderStreaksAndRewards();
+          showToast('Holiday shield updated! Your weekend off-days will never break your commute streak.', '🛡️');
+        });
+      });
+
+      // Weak-Network / Offline Lite Mode Toggle
+      document.getElementById('toggleLiteModeBtn').addEventListener('click', () => {
+        state.liteMode = !state.liteMode;
+        document.body.classList.toggle('lite-mode-active', state.liteMode);
+        document.getElementById('liteModeQuickStrip').classList.toggle('hidden', !state.liteMode);
+        document.getElementById('liteModeBtnLabel').textContent = state.liteMode
+          ? 'Weak-Net Lite Mode: ON'
+          : 'Weak-Net Lite Mode: OFF';
+        document.getElementById('liveSyncIndicator').className = state.liteMode
+          ? 'inline-block w-2.5 h-2.5 rounded-full bg-amber-400'
+          : 'inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 pulse-dot';
+        document.getElementById('networkStatusText').textContent = state.liteMode
+          ? 'Offline / 2G Lite Mode Active • Using Cached Timetables & SMS Fallback'
+          : 'Socket.io + Redis Geo-Sync Active • Indore City Bus (AICTSL i-Bus BRTS, Midi & EV City Routes)';
+        showToast(
+          state.liteMode
+            ? 'Weak-Network Lite Mode enabled: Cached schedules & SMS alerts ready.'
+            : 'Back to Live Telemetry Mode.',
+          '📡'
+        );
+      });
+
+      document.getElementById('jumpToSmsBtn').addEventListener('click', () => switchTab('tab-offline'));
+      document.getElementById('refreshOfflineCacheBtn').addEventListener('click', () => {
+        document.getElementById('lastCacheTime').textContent = 'Synced 1 sec ago';
+        showToast('Offline timetable & stop directory cached for zero-network zones!', '💾');
+      });
+
+      // SMS Alert Simulator
+      document.getElementById('sendSimulatedSmsBtn').addEventListener('click', () => {
+        const cmd = document.getElementById('smsCommandSelect').value;
+        const responses = {
+          'BUS DHAR-INDR': '[RaahSaathi SMS]: Next Bus MP-09-FA-4821 in 3m (~85% Est Crowd, +6m late at Ghatabillod). Following Bus MP-11-ZC-1904 in 11m (~40% Est Crowd, On Time). Reply HOLD 1904 to lock pass seat.',
+          'STOP RAU-CIR': '[RaahSaathi SMS]: Rau Circle Stop Queue: HIGH (~44 waiting, 38% seat chance). Tip: Walk 450m upstream to Silicon City Gate Stop (~9 waiting, 89% seat chance).',
+          'POOL PITHAMPUR': '[RaahSaathi SMS]: 2 Verified Carpools Rau->Pithampur Sec3: (1) Suresh P. 08:05 AM ₹60 (4 seats) (2) Karan S. Bike Pool 07:50 AM ₹35. Reply JOIN 1 to book.'
+        };
+        document.getElementById('smsOutputBox').textContent = responses[cmd];
+        showToast('Offline SMS response simulated!', '📲');
+      });
+
+      // Initial Render
+      renderRoutes();
+      renderReportsFeed();
+      renderStopAdvisor();
+      renderCarpools();
+      renderCostComparator();
+      renderStreaksAndRewards();
+
+      // ==========================================
+      // LEAFLET.JS INDORE LIVE MAP & SOCKET.IO + REDIS SIMULATION
+      // ==========================================
+      const indoreBusesLive = [
+        { id: 'IB-104', name: 'i-Bus #IB-104 (BRTS)', lat: 22.6926, lng: 75.8676, crowd: '85% Crowded', color: '#f43f5e', route: 'Rau → Bhawarkuan → Palasia → Vijay Nagar' },
+        { id: 'IB-209', name: 'i-Bus EV #IB-209 (BRTS)', lat: 22.6795, lng: 75.8595, crowd: '40% Seats Open', color: '#10b981', route: 'Rajiv Gandhi Sq → LIG → Niranjanpur' },
+        { id: 'PK-04', name: 'Pink i-Bus #PK-04 (Ladies Special)', lat: 22.7120, lng: 75.8785, crowd: '48% Seats Open', color: '#ec4899', route: 'Geeta Bhawan ↔ Vijay Nagar ↔ Niranjanpur' },
+        { id: 'M-4', name: 'City Bus #M-4 (MG Road Feeder)', lat: 22.7196, lng: 75.8577, crowd: '55% Moderate', color: '#f59e0b', route: 'Rajwada → Regal → Palasia → Khajrana' },
+        { id: 'E-2', name: 'AICTSL Electric #E-2 (Super Corridor)', lat: 22.7520, lng: 75.8180, crowd: '35% Seats Open', color: '#38bdf8', route: 'TCS / Infosys Super Corridor ↔ Airport ↔ Sarwate' },
+        { id: 'R-5', name: 'City Midi #R-5 (Ring Road)', lat: 22.7010, lng: 75.8490, crowd: '60% Moderate', color: '#a855f7', route: 'Mhow Naka → Sapna Sangeeta → Tower Sq → Bhawarkuan' },
+        { id: 'C-1', name: 'Ring Road Express #C-1', lat: 22.7320, lng: 75.9050, crowd: '72% Busy', color: '#fb923c', route: 'Teen Imli → Musakhedi → Bengali Sq → Radisson → Bombay Hosp' },
+        { id: 'M-19', name: 'Industrial Shuttle #M-19', lat: 22.7780, lng: 75.8850, crowd: '50% Moderate', color: '#2dd4bf', route: 'MR-10 ISBT → Aurobindo → Vijay Nagar → Dewas Naka' }
+      ];
+
+      const indoreStopsGeo = [
+        // AB Road BRTS Stops (South to North)
+        { name: 'IIM Indore Gate (Rau)', lat: 22.6250, lng: 75.8050, queue: 18, high: false, zone: 'BRTS South' },
+        { name: 'Medicaps University Gate', lat: 22.6320, lng: 75.8090, queue: 54, high: true, zone: 'BRTS South' },
+        { name: 'Rau Circle Bypass Hub', lat: 22.6405, lng: 75.8140, queue: 36, high: true, zone: 'BRTS South' },
+        { name: 'Silicon City Gate Stop', lat: 22.6580, lng: 75.8340, queue: 12, high: false, zone: 'BRTS South' },
+        { name: 'IPS Academy / Rajendra Nagar', lat: 22.6685, lng: 75.8465, queue: 29, high: false, zone: 'BRTS South' },
+        { name: 'Rajiv Gandhi Square / Crystal IT Park', lat: 22.6795, lng: 75.8595, queue: 52, high: true, zone: 'BRTS Core' },
+        { name: 'Vishnupuri / Mata Gujri Upstream Stop', lat: 22.6870, lng: 75.8640, queue: 9, high: false, zone: 'BRTS Core' },
+        { name: 'Bhawarkuan Square BRTS (DAVV)', lat: 22.6915, lng: 75.8675, queue: 44, high: true, zone: 'BRTS Core' },
+        { name: 'Holkar Science College BRTS', lat: 22.6980, lng: 75.8710, queue: 15, high: false, zone: 'BRTS Core' },
+        { name: 'Navlakha Square / Bus Stand', lat: 22.7045, lng: 75.8748, queue: 41, high: true, zone: 'BRTS Core' },
+        { name: 'Zoo / GPO Square BRTS', lat: 22.7100, lng: 75.8770, queue: 19, high: false, zone: 'BRTS Core' },
+        { name: 'Shivaji Vatika / AICTSL HQ', lat: 22.7145, lng: 75.8790, queue: 16, high: false, zone: 'BRTS Core' },
+        { name: 'Geeta Bhawan Square BRTS', lat: 22.7190, lng: 75.8815, queue: 14, high: false, zone: 'BRTS Core' },
+        { name: 'Palasia Square / 56 Dukan BRTS', lat: 22.7244, lng: 75.8839, queue: 35, high: true, zone: 'BRTS Core' },
+        { name: 'Industry House AB Road', lat: 22.7305, lng: 75.8865, queue: 11, high: false, zone: 'BRTS Core' },
+        { name: 'LIG Square BRTS', lat: 22.7355, lng: 75.8885, queue: 33, high: false, zone: 'BRTS Core' },
+        { name: 'Press Complex / MR-9 BRTS', lat: 22.7435, lng: 75.8908, queue: 20, high: false, zone: 'BRTS North' },
+        { name: 'Vijay Nagar Square / C21 Mall BRTS', lat: 22.7533, lng: 75.8937, queue: 38, high: true, zone: 'BRTS North' },
+        { name: 'Satya Sai Square BRTS', lat: 22.7615, lng: 75.8955, queue: 11, high: false, zone: 'BRTS North' },
+        { name: 'Niranjanpur / Scheme 78 Terminus', lat: 22.7745, lng: 75.8980, queue: 14, high: false, zone: 'BRTS North' },
+        // Central, West & Super Corridor Stops
+        { name: 'Rajwada Central Palace Stop', lat: 22.7185, lng: 75.8545, queue: 22, high: false, zone: 'Central' },
+        { name: 'Regal Square / Gandhi Hall', lat: 22.7205, lng: 75.8675, queue: 15, high: false, zone: 'Central' },
+        { name: 'Sarwate Bus Stand / Indore Railway Stn', lat: 22.7140, lng: 75.8685, queue: 48, high: true, zone: 'Central' },
+        { name: 'Bada Ganpati / Gangwal Stand', lat: 22.7215, lng: 75.8390, queue: 17, high: false, zone: 'West' },
+        { name: 'Devi Ahilya Airport Terminal', lat: 22.7280, lng: 75.8040, queue: 19, high: false, zone: 'Airport' },
+        { name: 'TCS Garima Park (Super Corridor)', lat: 22.7580, lng: 75.7950, queue: 46, high: true, zone: 'Super Corridor' },
+        { name: 'Infosys SEZ Campus (Super Corridor)', lat: 22.7640, lng: 75.8120, queue: 39, high: true, zone: 'Super Corridor' },
+        { name: 'MR-10 ISBT / Aurobindo Hospital', lat: 22.7850, lng: 75.8620, queue: 37, high: true, zone: 'North' },
+        // Ring Road, East & South-West Stops
+        { name: 'Mhow Naka / Annapurna Temple', lat: 22.6990, lng: 75.8410, queue: 29, high: false, zone: 'South-West' },
+        { name: 'Tower Square / Sapna Sangeeta', lat: 22.6965, lng: 75.8575, queue: 27, high: false, zone: 'South' },
+        { name: 'Choithram Mandi / Gopur Square', lat: 22.6760, lng: 75.8420, queue: 23, high: false, zone: 'South' },
+        { name: 'Teen Imli / Musakhedi Ring Rd', lat: 22.6950, lng: 75.8920, queue: 31, high: false, zone: 'East Ring Rd' },
+        { name: 'Pipliyahana / World Cup Sq (Sch 140)', lat: 22.7090, lng: 75.9040, queue: 16, high: false, zone: 'East Ring Rd' },
+        { name: 'Bengali Square Ring Road', lat: 22.7240, lng: 75.9080, queue: 34, high: false, zone: 'East Ring Rd' },
+        { name: 'Radisson Square (Ring Road)', lat: 22.7485, lng: 75.9080, queue: 39, high: true, zone: 'East Ring Rd' },
+        { name: 'Khajrana Ganesh Mandir Square', lat: 22.7425, lng: 75.9160, queue: 32, high: false, zone: 'East' },
+        { name: 'Bombay Hospital Square', lat: 22.7595, lng: 75.9075, queue: 12, high: false, zone: 'North-East' },
+        { name: 'Dewas Naka Industrial Hub', lat: 22.7820, lng: 75.9090, queue: 42, high: true, zone: 'North-East' }
+      ];
+
+      let mapInstance = null;
+      const busMarkers = {};
+      const socketLogs = [
+        '[SOCKET.IO] Connected to wss://transit.indore-aictsl.in (38 Stops Synced)',
+        '[REDIS GEO] GEOADD indore:buses 75.8676 22.6926 "IB-104" (TTL 30s)',
+        '[CROWD ENGINE] #IB-104 occupancy 85% verified (ETM + 6 GPS reports)',
+        '[TRANSFER SYNC] Rajiv Gandhi Sq Feeder M-12 -> i-Bus #IB-209 buffer +115s'
+      ];
+
+      function renderSocketLogs() {
+        const box = document.getElementById('liveSocketLogBox');
+        if (!box) return;
+        box.innerHTML = socketLogs.slice(0, 7).map(l => `<div class="border-b border-slate-800/80 pb-1">${l}</div>`).join('');
+      }
+      renderSocketLogs();
+
+      let currentGmapMode = 'roadmap'; // 'roadmap' | 'satellite'
+      let showTrafficOverlay = true;
+      let gridLayerInstance = null;
+      let trafficPolylines = [];
+
+      // Web Mercator helper: converts (lat, lng, z) -> pixel coordinates in global world space
+      function latLngToWorldPx(lat, lng, z) {
+        const scale = 256 * Math.pow(2, z);
+        const x = ((lng + 180) / 360) * scale;
+        const sinLat = Math.sin((lat * Math.PI) / 180);
+        const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale;
+        return { x, y };
+      }
+
+      // Authentic Indore Geographic Features for Google Maps Vector Street Rendering
+      const indoreParks = [
+        { name: 'Pipliyapala Regional Park', coords: [[22.681, 75.849], [22.688, 75.849], [22.688, 75.858], [22.681, 75.858]] },
+        { name: 'Kamla Nehru Zoo & GPO Green', coords: [[22.707, 75.873], [22.713, 75.873], [22.713, 75.880], [22.707, 75.880]] },
+        { name: 'Lalbagh Palace Estate', coords: [[22.699, 75.843], [22.706, 75.843], [22.706, 75.851], [22.699, 75.851]] },
+        { name: 'Meghdoot Garden & Scheme 54', coords: [[22.754, 75.886], [22.761, 75.886], [22.761, 75.894], [22.754, 75.894]] },
+        { name: 'IIM & Medicaps Green Belt', coords: [[22.622, 75.799], [22.635, 75.799], [22.635, 75.814], [22.622, 75.814]] },
+        { name: 'Super Corridor IT SEZ Green Zone', coords: [[22.752, 75.792], [22.768, 75.792], [22.768, 75.818], [22.752, 75.818]] }
+      ];
+
+      const indoreLakes = [
+        { name: 'Bilawali Lake', coords: [[22.669, 75.851], [22.677, 75.851], [22.677, 75.862], [22.669, 75.862]] },
+        { name: 'Sirpur Lake Wetland', coords: [[22.701, 75.812], [22.712, 75.812], [22.712, 75.826], [22.701, 75.826]] },
+        { name: 'Pipliyapala Talab', coords: [[22.682, 75.852], [22.687, 75.852], [22.687, 75.857], [22.682, 75.857]] }
+      ];
+
+      const kanhRiver = [
+        [22.665, 75.855], [22.685, 75.861], [22.705, 75.863],
+        [22.718, 75.860], [22.735, 75.866], [22.760, 75.872], [22.790, 75.878]
+      ];
+
+      const googleHighways = [
+        // AB Road (NH-52 / Old NH-3) South to North
+        { name: 'AB Road (NH-52)', weight: 9, color: '#fde293', casing: '#fbbc04', pts: [[22.615, 75.798], [22.6405, 75.8140], [22.6795, 75.8595], [22.6915, 75.8675], [22.7244, 75.8839], [22.7533, 75.8937], [22.7900, 75.9020]] },
+        // Eastern Ring Road
+        { name: 'Eastern Ring Rd', weight: 8, color: '#fde293', casing: '#fbbc04', pts: [[22.670, 75.850], [22.685, 75.880], [22.695, 75.892], [22.709, 75.904], [22.724, 75.908], [22.7485, 75.908], [22.7595, 75.9075], [22.785, 75.909]] },
+        // Super Corridor & MR-10
+        { name: 'Super Corridor / MR-10', weight: 8, color: '#fde293', casing: '#fbbc04', pts: [[22.728, 75.804], [22.758, 75.795], [22.764, 75.812], [22.785, 75.862], [22.7615, 75.8955], [22.7485, 75.908]] },
+        // Western Ring Road / Annapurna / Dhar Road
+        { name: 'Western Ring & Dhar Rd', weight: 7, color: '#ffffff', casing: '#bdc1c6', pts: [[22.676, 75.842], [22.699, 75.841], [22.7215, 75.839], [22.728, 75.804]] },
+        // MG Road (Bada Ganpati -> Rajwada -> Regal -> Palasia -> Khajrana)
+        { name: 'MG Road', weight: 7, color: '#ffffff', casing: '#bdc1c6', pts: [[22.7215, 75.839], [22.7185, 75.8545], [22.7205, 75.8675], [22.7244, 75.8839], [22.7425, 75.916]] },
+        // Khandwa Road (Bhawarkuan -> DAVV -> Tejaji Nagar)
+        { name: 'Khandwa Rd', weight: 6, color: '#ffffff', casing: '#bdc1c6', pts: [[22.6915, 75.8675], [22.675, 75.878], [22.645, 75.895]] },
+        // Ujjain Road (Regal -> Banganga -> Aurobindo)
+        { name: 'Ujjain Rd (SH-27)', weight: 7, color: '#fde293', casing: '#fbbc04', pts: [[22.7205, 75.8675], [22.750, 75.865], [22.785, 75.862], [22.805, 75.855]] }
+      ];
+
+      const indoreAreaLabels = [
+        { text: 'VIJAY NAGAR', lat: 22.756, lng: 75.888 },
+        { text: 'PALASIA', lat: 22.726, lng: 75.878 },
+        { text: 'RAJWADA CENTRAL', lat: 22.719, lng: 75.850 },
+        { text: 'BHAWARKUAN (DAVV)', lat: 22.691, lng: 75.858 },
+        { text: 'NAVLAKHA', lat: 22.704, lng: 75.882 },
+        { text: 'RAJENDRA NAGAR', lat: 22.669, lng: 75.838 },
+        { text: 'RAU CIRCLE', lat: 22.641, lng: 75.822 },
+        { text: 'SUPER CORRIDOR IT SEZ', lat: 22.766, lng: 75.805 },
+        { text: 'KHAJRANA', lat: 22.744, lng: 75.922 },
+        { text: 'ANNAPURNA / MHOW NAKA', lat: 22.698, lng: 75.831 },
+        { text: 'BENGALI SQUARE', lat: 22.724, lng: 75.916 },
+        { text: 'SCHEME NO. 78', lat: 22.773, lng: 75.889 },
+        { text: 'SARWATE / RAILWAY STN', lat: 22.713, lng: 75.865 },
+        { text: 'DEWAS NAKA', lat: 22.783, lng: 75.915 }
+      ];
+
+      function initIndoreMap() {
+        if (typeof L === 'undefined') return;
+        const mapEl = document.getElementById('indoreLeafletMap');
+        if (!mapEl) return;
+
+        mapInstance = L.map('indoreLeafletMap', {
+          center: [22.7185, 75.8685],
+          zoom: 12,
+          zoomControl: true
+        });
+
+        // Google Maps Hybrid Engine: Renders authentic Google Maps Road / Satellite canvas + attempts live Google Maps / OSM tiles
+        const GoogleMapsStyleLayer = L.GridLayer.extend({
+          createTile: function(coords) {
+            const tile = document.createElement('canvas');
+            const size = this.getTileSize();
+            tile.width = size.x;
+            tile.height = size.y;
+            const ctx = tile.getContext('2d');
+            const originX = coords.x * size.x;
+            const originY = coords.y * size.y;
+            const z = coords.z;
+
+            function toLocal(lat, lng) {
+              const w = latLngToWorldPx(lat, lng, z);
+              return { x: w.x - originX, y: w.y - originY };
+            }
+
+            function drawGoogleBase() {
+              const isSat = currentGmapMode === 'satellite';
+              // 1. Land background (Google Maps classic #f1f3f4 or Satellite deep earth #1a2e22)
+              ctx.fillStyle = isSat ? '#182c20' : '#f1f3f4';
+              ctx.fillRect(0, 0, size.x, size.y);
+
+              // 2. Urban sector blocks & minor city street grid (Google Maps #e8eaed blocks + white minor streets)
+              const blockStep = 42;
+              ctx.fillStyle = isSat ? 'rgba(255,255,255,0.04)' : '#e8eaed';
+              for (let bx = 4; bx < size.x; bx += blockStep) {
+                for (let by = 4; by < size.y; by += blockStep) {
+                  ctx.fillRect(bx, by, blockStep - 6, blockStep - 6);
+                }
+              }
+
+              // 3. Green Parks & Campus Estates (Google Maps park green #ceead6)
+              indoreParks.forEach(pk => {
+                ctx.fillStyle = isSat ? '#1e4620' : '#ceead6';
+                ctx.beginPath();
+                pk.coords.forEach((pt, i) => {
+                  const p = toLocal(pt[0], pt[1]);
+                  if (i === 0) ctx.moveTo(p.x, p.y);
+                  else ctx.lineTo(p.x, p.y);
+                });
+                ctx.closePath();
+                ctx.fill();
+              });
+
+              // 4. Lakes & Kanh/Saraswati Rivers (Google Maps water blue #aadaff)
+              indoreLakes.forEach(lk => {
+                ctx.fillStyle = isSat ? '#0c3b5e' : '#aadaff';
+                ctx.beginPath();
+                lk.coords.forEach((pt, i) => {
+                  const p = toLocal(pt[0], pt[1]);
+                  if (i === 0) ctx.moveTo(p.x, p.y);
+                  else ctx.lineTo(p.x, p.y);
+                });
+                ctx.closePath();
+                ctx.fill();
+              });
+
+              ctx.strokeStyle = isSat ? '#164e78' : '#aadaff';
+              ctx.lineWidth = Math.max(3, z - 8);
+              ctx.lineCap = 'round';
+              ctx.beginPath();
+              kanhRiver.forEach((pt, i) => {
+                const p = toLocal(pt[0], pt[1]);
+                if (i === 0) ctx.moveTo(p.x, p.y);
+                else ctx.lineTo(p.x, p.y);
+              });
+              ctx.stroke();
+
+              // 5. Google Maps Highways & Arterial Roads (Casing + Fill)
+              googleHighways.forEach(hw => {
+                // Casing
+                ctx.strokeStyle = hw.casing;
+                ctx.lineWidth = hw.weight + 2.5;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                hw.pts.forEach((pt, i) => {
+                  const p = toLocal(pt[0], pt[1]);
+                  if (i === 0) ctx.moveTo(p.x, p.y);
+                  else ctx.lineTo(p.x, p.y);
+                });
+                ctx.stroke();
+
+                // Inner Fill
+                ctx.strokeStyle = isSat ? '#fbbc04' : hw.color;
+                ctx.lineWidth = hw.weight;
+                ctx.beginPath();
+                hw.pts.forEach((pt, i) => {
+                  const p = toLocal(pt[0], pt[1]);
+                  if (i === 0) ctx.moveTo(p.x, p.y);
+                  else ctx.lineTo(p.x, p.y);
+                });
+                ctx.stroke();
+              });
+
+              // 6. Locality / Neighborhood Labels (Google Maps uppercase gray/slate typography)
+              ctx.font = 'bold 10px Inter, Roboto, Arial, sans-serif';
+              ctx.textAlign = 'center';
+              indoreAreaLabels.forEach(lbl => {
+                const p = toLocal(lbl.lat, lbl.lng);
+                if (p.x >= -60 && p.x <= size.x + 60 && p.y >= -20 && p.y <= size.y + 20) {
+                  ctx.lineWidth = 3;
+                  ctx.strokeStyle = isSat ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.92)';
+                  ctx.strokeText(lbl.text, p.x, p.y);
+                  ctx.fillStyle = isSat ? '#f8fafc' : '#5f6368';
+                  ctx.fillText(lbl.text, p.x, p.y);
+                }
+              });
+            }
+
+            // Paint Google Maps vector base immediately (zero latency, never blank!)
+            drawGoogleBase();
+
+            // Also try loading live Google Maps tile if browser allows external images
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.referrerPolicy = 'no-referrer';
+            const lyrs = currentGmapMode === 'satellite' ? 'y' : 'm';
+            img.onload = function() {
+              ctx.drawImage(img, 0, 0, size.x, size.y);
+            };
+            img.src = `https://mt1.google.com/vt/lyrs=${lyrs}&x=${coords.x}&y=${coords.y}&z=${coords.z}`;
+
+            return tile;
+          }
+        });
+
+        gridLayerInstance = new GoogleMapsStyleLayer({
+          attribution: 'Map data &copy; Google Maps / Indore AICTSL Smart Transit GIS'
+        }).addTo(mapInstance);
+
+        // 1. Blue Corridor: AB Road BRTS (Google Maps Transit Blue #1a73e8 with white casing)
+        const brtsCoords = [
+          [22.6250, 75.8050], [22.6320, 75.8090], [22.6405, 75.8140], [22.6580, 75.8340],
+          [22.6685, 75.8465], [22.6795, 75.8595], [22.6870, 75.8640], [22.6915, 75.8675],
+          [22.6980, 75.8710], [22.7045, 75.8748], [22.7100, 75.8770], [22.7145, 75.8790],
+          [22.7190, 75.8815], [22.7244, 75.8839], [22.7305, 75.8865], [22.7355, 75.8885],
+          [22.7435, 75.8908], [22.7533, 75.8937], [22.7615, 75.8955], [22.7745, 75.8980]
+        ];
+        L.polyline(brtsCoords, { color: '#ffffff', weight: 9, opacity: 0.9 }).addTo(mapInstance);
+        L.polyline(brtsCoords, { color: '#1a73e8', weight: 5.5, opacity: 1.0 })
+          .addTo(mapInstance)
+          .bindPopup('<strong>🔵 Indore AB Road BRTS Corridor (i-Bus)</strong><br/>20 Stations • Dedicated Bus Lane');
+
+        // 2. Live Google Maps Traffic Overlay Segments (Red = Heavy Jam at Navlakha/Bhawarkuan, Orange = Moderate at Palasia)
+        const jamSegment1 = L.polyline([[22.6870, 75.8640], [22.6915, 75.8675], [22.7045, 75.8748]], {
+          color: '#ea4335', weight: 6, opacity: 0.9
+        }).addTo(mapInstance).bindPopup('<strong>🔴 Heavy Traffic Jam (+6 min delay)</strong><br/>Bhawarkuan ↔ Navlakha Square');
+
+        const jamSegment2 = L.polyline([[22.7190, 75.8815], [22.7244, 75.8839], [22.7355, 75.8885]], {
+          color: '#fbbc04', weight: 6, opacity: 0.9
+        }).addTo(mapInstance).bindPopup('<strong>🟡 Moderate Traffic</strong><br/>Geeta Bhawan ↔ Palasia ↔ LIG');
+        trafficPolylines = [jamSegment1, jamSegment2];
+
+        // 3. Feeder Corridors (MG Road, Super Corridor EV, Ring Road)
+        const mgRoadCoords = [
+          [22.7280, 75.8040], [22.7215, 75.8390], [22.7185, 75.8545],
+          [22.7205, 75.8675], [22.7244, 75.8839], [22.7425, 75.9160]
+        ];
+        L.polyline(mgRoadCoords, { color: '#e37400', weight: 4, opacity: 0.9, dashArray: '6, 6' })
+          .addTo(mapInstance)
+          .bindPopup('<strong>🟠 Route M-4 / East-West MG Road Corridor</strong><br/>Airport ↔ Rajwada ↔ Palasia ↔ Khajrana');
+
+        const superCorridorCoords = [
+          [22.7580, 75.7950], [22.7640, 75.8120], [22.7850, 75.8620],
+          [22.7533, 75.8937], [22.7485, 75.9080]
+        ];
+        L.polyline(superCorridorCoords, { color: '#188038', weight: 4, opacity: 0.9, dashArray: '5, 5' })
+          .addTo(mapInstance)
+          .bindPopup('<strong>🟢 Super Corridor &amp; MR-10 EV Route (#E-2)</strong><br/>TCS / Infosys ↔ MR-10 ISBT ↔ Vijay Nagar');
+
+        const ringRoadCoords = [
+          [22.6760, 75.8420], [22.6990, 75.8410], [22.6965, 75.8575], [22.6915, 75.8675],
+          [22.6950, 75.8920], [22.7090, 75.9040], [22.7240, 75.9080], [22.7485, 75.9080],
+          [22.7595, 75.9075], [22.7820, 75.9090]
+        ];
+        L.polyline(ringRoadCoords, { color: '#9334e6', weight: 3.5, opacity: 0.85, dashArray: '8, 6' })
+          .addTo(mapInstance)
+          .bindPopup('<strong>🟣 Eastern &amp; Western Ring Road Feeder (#C-1 / #R-5)</strong>');
+
+        // Draw All 38 Indore Stop Queue Markers (Google Maps Bus Station Pin Style)
+        indoreStopsGeo.forEach(st => {
+          const marker = L.circleMarker([st.lat, st.lng], {
+            radius: st.high ? 8 : 6,
+            fillColor: st.high ? '#d93025' : '#1a73e8',
+            color: '#ffffff',
+            weight: 2.5,
+            fillOpacity: 1.0
+          }).addTo(mapInstance);
+
+          marker.bindPopup(
+            `<div style="font-family:Inter,sans-serif;font-size:12px;color:#202124;min-width:180px;">
+              <div style="font-weight:800;font-size:13px;color:#1a73e8;margin-bottom:2px;">🚏 ${st.name}</div>
+              <div>Zone: <b>${st.zone}</b></div>
+              <div>Live Waiting Queue: <b>~${st.queue} commuters</b></div>
+              <div style="margin-top:4px;">Status: ${st.high ? '<span style="color:#d93025;font-weight:700;">🔴 High Crowd Queue</span>' : '<span style="color:#188038;font-weight:700;">🟢 Seats / Easy Boarding</span>'}</div>
+            </div>`
+          );
+
+          marker.bindTooltip(st.name, {
+            direction: 'top',
+            offset: [0, -6],
+            className: 'gmap-stop-label'
+          });
+        });
+
+        // Draw Live Moving Bus Markers (8 Active Indore Buses)
+        indoreBusesLive.forEach(bus => {
+          const icon = L.divIcon({
+            className: 'custom-bus-marker',
+            html: `<div style="background:${bus.color};color:#ffffff;font-weight:800;font-size:10px;padding:2px 7px;border-radius:999px;border:2px solid #202124;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.4);">🚌 ${bus.id}</div>`,
+            iconSize: [72, 24]
+          });
+          const marker = L.marker([bus.lat, bus.lng], { icon })
+            .addTo(mapInstance)
+            .bindPopup(
+              `<div style="font-family:Inter,sans-serif;font-size:12px;color:#202124;">
+                <strong style="color:#1a73e8;">${bus.name}</strong><br/>
+                Corridor: ${bus.route}<br/>
+                Est. Crowd: <b>${bus.crowd}</b> (Estimate Only)
+              </div>`
+            );
+          busMarkers[bus.id] = marker;
+        });
+
+        // Bind Map | Satellite | Traffic buttons
+        document.querySelectorAll('.gmap-mode-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            currentGmapMode = btn.getAttribute('data-gmapmode');
+            document.querySelectorAll('.gmap-mode-btn').forEach(b => {
+              const active = b.getAttribute('data-gmapmode') === currentGmapMode;
+              b.className = `gmap-mode-btn px-2.5 py-1 rounded-lg font-bold transition ${
+                active ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-slate-100'
+              }`;
+            });
+            if (gridLayerInstance) gridLayerInstance.redraw();
+            showToast(`Switched to Google Maps ${currentGmapMode === 'satellite' ? 'Satellite Hybrid' : 'Road Map'} view!`, '🗺️');
+          });
+        });
+
+        const trafficBtn = document.getElementById('toggleGmapTrafficBtn');
+        if (trafficBtn) {
+          trafficBtn.addEventListener('click', () => {
+            showTrafficOverlay = !showTrafficOverlay;
+            trafficPolylines.forEach(pl => {
+              if (showTrafficOverlay) pl.addTo(mapInstance);
+              else mapInstance.removeLayer(pl);
+            });
+            trafficBtn.textContent = showTrafficOverlay ? '🚦 Traffic: ON' : '🚦 Traffic: OFF';
+            trafficBtn.className = showTrafficOverlay
+              ? 'px-2.5 py-1 rounded-lg font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 transition'
+              : 'px-2.5 py-1 rounded-lg font-semibold bg-slate-200 text-slate-600 border border-slate-300 transition';
+          });
+        }
+
+        setTimeout(() => {
+          mapInstance.invalidateSize();
+        }, 250);
+      }
+
+      function tickSocketTelemetry(manual = false) {
+        indoreBusesLive.forEach(bus => {
+          bus.lat += (Math.random() - 0.42) * 0.0018;
+          bus.lng += (Math.random() - 0.42) * 0.0018;
+          if (busMarkers[bus.id]) {
+            busMarkers[bus.id].setLatLng([bus.lat, bus.lng]);
+          }
+        });
+        const sample = indoreBusesLive[Math.floor(Math.random() * indoreBusesLive.length)];
+        const latency = Math.floor(12 + Math.random() * 19);
+        const badge = document.getElementById('socketLatencyBadge');
+        if (badge) badge.textContent = `${latency}ms`;
+
+        const nowStr = new Date().toLocaleTimeString([], { hour12: false });
+        socketLogs.unshift(`[${nowStr}] SOCKET bus:gps -> ${sample.id} @ (${sample.lat.toFixed(4)}, ${sample.lng.toFixed(4)}) • ${sample.crowd}`);
+        if (socketLogs.length > 15) socketLogs.pop();
+        renderSocketLogs();
+        if (manual) {
+          showToast(`Socket.io GPS tick synced via Redis GEOADD (${latency}ms)!`, '⚡');
+        }
+      }
+
+      initIndoreMap();
+      setInterval(() => tickSocketTelemetry(false), 3200);
+
+      document.getElementById('centerMapIndoreBtn').addEventListener('click', () => {
+        if (mapInstance) mapInstance.setView([22.7180, 75.8720], 12);
+        showToast('Centered map on Indore AB Road BRTS & City Bus Network!', '🗺️');
+      });
+      document.getElementById('simulateSocketTickBtn').addEventListener('click', () => tickSocketTelemetry(true));
+
+      // ==========================================
+      // SMART INDORE EXTRAS HANDLERS
+      // ==========================================
+      document.getElementById('requestFeederHoldBtn').addEventListener('click', () => {
+        document.getElementById('transferBufferBadge').textContent = '✅ Hold Acknowledged (+2m 30s Safe)';
+        showToast('Transfer alert sent via Socket.io to i-Bus #IB-209 driver terminal at Rajiv Gandhi Sq!', '🔄');
+      });
+
+      document.getElementById('triggerPinkSosBtn').addEventListener('click', () => {
+        showToast('🚨 Live GPS & Bus ID #PK-04 shared with AICTSL Command Center & Emergency Contacts!', '🛡️');
+      });
+
+      let walletBal = 245;
+      document.getElementById('generateQrTicketBtn').addEventListener('click', () => {
+        if (walletBal < 15) {
+          showToast('Low Smart Wallet balance!', '⚠️');
+          return;
+        }
+        walletBal -= 15;
+        document.getElementById('walletBalanceDisplay').textContent = `₹${walletBal}.00`;
+        const token = 'AICTSL-QR-' + Math.floor(10000 + Math.random() * 89999) + '-VALID';
+        document.getElementById('qrTokenPreviewBox').textContent = `Token: ${token}`;
+        showToast(`Turnstile QR Ticket generated (${token})! ₹15 deducted with Streak Discount.`, '🎫');
+      });
+
+      // ==========================================
+            // ==========================================
+      // LIVE REAL-TIME TELEMETRY ENGINE (RUNS AUTOMATICALLY EVERY 1.2s)
+      // ==========================================
+      let liveStreamRunning = true;
+      let totalPacketsCount = 1840;
+      let verifiedReportsCounter = 312;
+      let uptimeSeconds = 2538;
+
+      const techFeedEvents = [
+        '[SOCKET.IO] room:brts-ab-road broadcast -> #IB-104 GPS (22.6926, 75.8676) • 36 km/h',
+        '[REDIS GEO] GEORADIUS indore:stops 75.8675 22.6915 150m -> Match: Bhawarkuan BRTS',
+        '[ETM SENSOR] #IB-209 AC Electric BRTS -> 24 passengers onboard (~40% Est. Crowd)',
+        '[CROWD VOTE] +1 GPS-verified report on #M-4 at Regal Square (Confidence: 97.2%)',
+        '[SOCKET.IO] room:super-corridor-ev -> #E-2 approaching TCS Garima Park Gate-1'
+      ];
+
+      function formatUptime(sec) {
+        const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+        const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+        const s = String(sec % 60).padStart(2, '0');
+        return `Uptime: ${h}:${m}:${s}`;
+      }
+
+      function renderLiveFleetTable() {
+        const tbody = document.getElementById('liveFleetTelemetryBody');
+        if (!tbody) return;
+        tbody.innerHTML = indoreBusesLive.map(bus => {
+          const speed = bus.speed || 34;
+          const crowdPctNum = parseInt(bus.crowd, 10) || 50;
+          const badgeClass = crowdPctNum >= 75
+            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+            : crowdPctNum >= 55
+            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+            : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+
+          return `
+            <tr class="hover:bg-slate-900/90 transition">
+              <td class="py-2 px-2 font-bold text-white whitespace-nowrap">
+                <span class="inline-block w-2 h-2 rounded-full mr-1" style="background:${bus.color}"></span>${bus.id}
+              </td>
+              <td class="py-2 px-2 text-slate-300">${bus.lat.toFixed(4)}, ${bus.lng.toFixed(4)}</td>
+              <td class="py-2 px-2 text-sky-300 font-semibold">${speed} km/h</td>
+              <td class="py-2 px-2">
+                <span class="px-2 py-0.5 rounded border text-[10px] font-bold ${badgeClass}">${bus.crowd}</span>
+              </td>
+              <td class="py-2 px-2 text-right">
+                <button type="button" data-focusbus="${bus.id}" class="focus-bus-map-btn px-2 py-0.5 rounded bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-amber-300 text-[10px] font-bold transition">
+                  📍 Map
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+        tbody.querySelectorAll('.focus-bus-map-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const busId = btn.getAttribute('data-focusbus');
+            const targetBus = indoreBusesLive.find(b => b.id === busId);
+            switchTab('tab-routes');
+            if (targetBus && mapInstance) {
+              setTimeout(() => {
+                mapInstance.invalidateSize();
+                mapInstance.setView([targetBus.lat, targetBus.lng], 14);
+                if (busMarkers[targetBus.id]) busMarkers[targetBus.id].openPopup();
+              }, 150);
+              showToast(`Tracking ${targetBus.name} live on Google Maps view!`, '🚌');
+            }
+          });
+        });
+      }
+
+      function renderTechStackFeed() {
+        const box = document.getElementById('techStackLiveFeedBox');
+        if (!box) return;
+        box.innerHTML = techFeedEvents.slice(0, 8).map(ev => {
+          const isRedis = ev.includes('[REDIS');
+          const isCrowd = ev.includes('[CROWD') || ev.includes('[ETM');
+          const colorClass = isRedis ? 'text-rose-300' : isCrowd ? 'text-amber-300' : 'text-emerald-300';
+          return `<div class="border-b border-slate-900 pb-1.5 leading-relaxed ${colorClass}">${ev}</div>`;
+        }).join('');
+      }
+
+      function stepLiveTelemetryEngine(manualBurst = false) {
+        if (!liveStreamRunning && !manualBurst) return;
+
+        uptimeSeconds += 1;
+        totalPacketsCount += Math.floor(8 + Math.random() * 14);
+
+        // Update each bus speed & slight crowd fluctuation
+        indoreBusesLive.forEach(bus => {
+          bus.speed = Math.floor(26 + Math.random() * 24);
+        });
+
+        // Also move buses on the Leaflet map
+        tickSocketTelemetry(false);
+
+        const lat = Math.floor(11 + Math.random() * 11);
+        const redisMs = (1.2 + Math.random() * 1.4).toFixed(1);
+        const clients = 1475 + Math.floor(Math.random() * 35);
+        const rate = 82 + Math.floor(Math.random() * 18);
+        const redisOps = 135 + Math.floor(Math.random() * 30);
+        const conf = (95.8 + Math.random() * 2.1).toFixed(1);
+
+        const setTxt = (id, val) => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = val;
+        };
+
+        setTxt('liveEngineUptime', formatUptime(uptimeSeconds));
+        setTxt('statBroadcastLatency', `${lat} ms`);
+        setTxt('statActiveSockets', clients.toLocaleString());
+        setTxt('statGpsRate', `${rate}/s`);
+        setTxt('nodeRedisLatency', `${redisMs} ms`);
+        setTxt('nodeRedisOps', `${redisOps}/sec`);
+        setTxt('nodeCrowdConf', `${conf}% Conf`);
+        setTxt('nodeVerifiedCount', verifiedReportsCounter);
+        setTxt('livePacketCounterBadge', `${totalPacketsCount.toLocaleString()} pkts`);
+        setTxt('nodePwaSyncText', `Synced ${(0.2 + Math.random() * 0.7).toFixed(1)}s ago`);
+
+        setTxt('roomCountBrts', `${680 + Math.floor(Math.random() * 18)} online`);
+        setTxt('roomCountMg', `${415 + Math.floor(Math.random() * 14)} online`);
+        setTxt('roomCountEv', `${375 + Math.floor(Math.random() * 15)} online`);
+
+        // Animate progress bars
+        const setBar = (id, w) => {
+          const el = document.getElementById(id);
+          if (el) el.style.width = `${w}%`;
+        };
+        setBar('nodePwaBar', 88 + Math.floor(Math.random() * 11));
+        setBar('nodeSocketBar', 75 + Math.floor(Math.random() * 20));
+        setBar('nodeRedisBar', 70 + Math.floor(Math.random() * 24));
+        setBar('nodeCrowdBar', 86 + Math.floor(Math.random() * 12));
+
+        // Push a fresh live event into the scrolling terminal
+        const busSample = indoreBusesLive[Math.floor(Math.random() * indoreBusesLive.length)];
+        const stopSample = indoreStopsGeo[Math.floor(Math.random() * indoreStopsGeo.length)];
+        const nowStr = new Date().toLocaleTimeString([], { hour12: false });
+        const eventTemplates = [
+          `[${nowStr}] [SOCKET.IO] emit('bus:gps') -> ${busSample.id} @ (${busSample.lat.toFixed(4)}, ${busSample.lng.toFixed(4)}) • ${busSample.speed} km/h`,
+          `[${nowStr}] [REDIS GEO] GEORADIUS indore:stops (150m) -> Verified commuter @ ${stopSample.name} (Queue: ~${stopSample.queue})`,
+          `[${nowStr}] [ETM SYNC] ${busSample.name} -> Live occupancy ${busSample.crowd} (${lat}ms broadcast)`,
+          `[${nowStr}] [CROWD AI] Next-bus vs Following-bus delta updated for ${stopSample.zone} corridor`
+        ];
+        techFeedEvents.unshift(eventTemplates[Math.floor(Math.random() * eventTemplates.length)]);
+        if (techFeedEvents.length > 16) techFeedEvents.pop();
+
+        renderLiveFleetTable();
+        renderTechStackFeed();
+
+        if (manualBurst) {
+          showToast(`Burst telemetry synced across all 8 Indore buses in ${lat}ms!`, '⚡');
+        }
+      }
+
+      renderLiveFleetTable();
+      renderTechStackFeed();
+      setInterval(() => stepLiveTelemetryEngine(false), 1200);
+
+      const pingBtn = document.getElementById('sendTestPingBtn');
+      if (pingBtn) {
+        pingBtn.addEventListener('click', () => stepLiveTelemetryEngine(true));
+      }
+
+      const toggleStreamBtn = document.getElementById('toggleLiveStreamBtn');
+      if (toggleStreamBtn) {
+        toggleStreamBtn.addEventListener('click', () => {
+          liveStreamRunning = !liveStreamRunning;
+          document.getElementById('toggleLiveStreamIcon').textContent = liveStreamRunning ? '⏸️' : '▶️';
+          document.getElementById('toggleLiveStreamLabel').textContent = liveStreamRunning
+            ? 'Live Stream: RUNNING (1s tick)'
+            : 'Live Stream: PAUSED';
+          toggleStreamBtn.className = liveStreamRunning
+            ? 'px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-bold text-emerald-300 transition flex items-center gap-1.5'
+            : 'px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-bold text-amber-300 transition flex items-center gap-1.5';
+          showToast(liveStreamRunning ? 'Live Socket.io & Redis telemetry stream resumed!' : 'Live stream paused.', '📡');
+        });
+      }
+
+      const surgeBtn = document.getElementById('simulateCrowdSurgeBtn');
+      if (surgeBtn) {
+        surgeBtn.addEventListener('click', () => {
+          verifiedReportsCounter += 3;
+          const nowStr = new Date().toLocaleTimeString([], { hour12: false });
+          techFeedEvents.unshift(`[${nowStr}] [CROWD SURGE] 3 new GPS-verified commuter votes @ Bhawarkuan BRTS (+15 Scout Pts awarded)`);
+          stepLiveTelemetryEngine(false);
+          showToast('Simulated 3 GPS-verified crowd votes via Redis GEORADIUS!', '🔥');
+        });
+      }
+    });
+  </script>
+</body>
+</html>
